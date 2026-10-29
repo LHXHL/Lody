@@ -92,11 +92,14 @@ export function makeE2eeRpcClient(options: {
     if (frame.length > E2EE_RPC_MAX_FRAME_BYTES)
       return yield* Effect.fail(new Error('e2ee_rpc_frame'));
     const binding = yield* options.binding(e2eeRpcResource(targetMachineId));
-    const opened = yield* binding.openRequest(frame);
-    yield* Effect.addFinalizer(() => Effect.sync(() => opened.plaintext.fill(0)));
+    const opened = yield* Effect.acquireRelease(binding.openRequest(frame), (value) =>
+      Effect.sync(() => value.plaintext.fill(0))
+    );
     try {
-      const body = yield* attempt(() => decodeE2eeRpcRequestBody(opened.plaintext));
-      yield* Effect.addFinalizer(() => Effect.sync(() => body.params.fill(0)));
+      const body = yield* Effect.acquireRelease(
+        attempt(() => decodeE2eeRpcRequestBody(opened.plaintext)),
+        (value) => Effect.sync(() => value.params.fill(0))
+      );
       try {
         if (body.method !== 'session/dispatch-turn')
           return yield* Effect.fail(new Error('e2ee_rpc_method'));
@@ -234,9 +237,15 @@ export function makeE2eeRpcClient(options: {
           return yield* Effect.fail(new Error('e2ee_rpc_intent_conflict'));
         const frame = yield* attempt(() => unhex(frameHex, E2EE_RPC_MAX_FRAME_BYTES));
         const binding = yield* options.binding(e2eeRpcResource(machineId));
-        const opened = yield* binding.openResponse(frame, saved.signer, original.epoch);
+        const opened = yield* Effect.acquireRelease(
+          binding.openResponse(frame, saved.signer, original.epoch),
+          (value) => Effect.sync(() => value.plaintext.fill(0))
+        );
         try {
-          const response = yield* attempt(() => decodeE2eeRpcResponseBody(opened.plaintext));
+          const response = yield* Effect.acquireRelease(
+            attempt(() => decodeE2eeRpcResponseBody(opened.plaintext)),
+            (value) => Effect.sync(() => value.payload.fill(0))
+          );
           try {
             if (
               hex(response.requestId) !== original.requestId ||

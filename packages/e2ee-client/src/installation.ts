@@ -94,25 +94,27 @@ export const openPreparedIdentity = Effect.fnUntraced(function* (
     verifyPersonalRequest(prepared.offer, prepared.requestHex)
   );
   const bodies: Uint8Array[] = [];
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      for (const body of bodies) body.fill(0);
-    })
-  );
   {
     for (const purpose of CLIENT_KEY_PURPOSES.slice(0, 3)) {
       const rows = prepared.wrapped.filter((row) => row.purpose === purpose);
       if (rows.length !== 1) return yield* fail('identity-lost');
-      bodies.push(yield* custody.unwrap(rows[0].purpose, rows[0].blob));
+      // Keep native completion and wipe registration in the same cancellation boundary.
+      bodies.push(
+        yield* Effect.acquireRelease(custody.unwrap(rows[0].purpose, rows[0].blob), (body) =>
+          Effect.sync(() => body.fill(0))
+        )
+      );
     }
     const device = yield* importBrowserDevice({
       signingPrivate: bodies[0],
       encryptionPrivate: bodies[1],
     });
-    const credential = yield* Effect.fromResult(
-      openCredentialPacket(prepared.binding, prepared.offer, bodies[2])
+    const credential = yield* Effect.acquireRelease(
+      Effect.sync(() => openCredentialPacket(prepared.binding, prepared.offer, bodies[2])).pipe(
+        Effect.flatMap(Effect.fromResult)
+      ),
+      (value) => Effect.sync(() => value.fill(0))
     );
-    yield* Effect.addFinalizer(() => Effect.sync(() => credential.fill(0)));
     if (
       !device.publicKey.equals(prepared.binding.device) ||
       toHex(device.publicKey.toBytes()) !== request.signingPublicKey ||
@@ -426,17 +428,17 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
           }
           if (!platform.drainOld) return yield* fail('unsupported');
         } else if (replacement) return yield* fail('conflict');
-        const signing = crypto.getRandomValues(new Uint8Array(32)),
-          encryption = crypto.getRandomValues(new Uint8Array(32)),
-          credential = crypto.getRandomValues(new Uint8Array(32));
-        let packet: Uint8Array | undefined;
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            signing.fill(0);
-            encryption.fill(0);
-            credential.fill(0);
-            packet?.fill(0);
-          })
+        const signing = yield* Effect.acquireRelease(
+          Effect.sync(() => crypto.getRandomValues(new Uint8Array(32))),
+          (body) => Effect.sync(() => body.fill(0))
+        );
+        const encryption = yield* Effect.acquireRelease(
+          Effect.sync(() => crypto.getRandomValues(new Uint8Array(32))),
+          (body) => Effect.sync(() => body.fill(0))
+        );
+        const credential = yield* Effect.acquireRelease(
+          Effect.sync(() => crypto.getRandomValues(new Uint8Array(32))),
+          (body) => Effect.sync(() => body.fill(0))
         );
         {
           const device = yield* importBrowserDevice({
@@ -483,7 +485,12 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
             });
           const { custody } = yield* acquirePersonalCustody(prepared);
           yield* custody.create();
-          packet = yield* Effect.fromResult(credentialPacket(binding, offer, credential));
+          const packet = yield* Effect.acquireRelease(
+            Effect.sync(() => credentialPacket(binding, offer, credential)).pipe(
+              Effect.flatMap(Effect.fromResult)
+            ),
+            (body) => Effect.sync(() => body.fill(0))
+          );
           const wrapped: ClientWrappedKey[] = [];
           for (const [purpose, body] of [
             ['signing-private-key', signing],

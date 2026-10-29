@@ -237,6 +237,8 @@ create 前必须持久化准备。候选创建还要求 `ClientPairingOriginalSt
 请求的本地完成回执；权限来自另外验真的审批原件，回执本身不是授权。
 `ClientIdentityOriginals.read` 返回拥有所有权的首次身份包装原件，包含中断准备。
 宿主必须齐备三份，实际解包并验证密钥对/credential 后才能 ready，另行核对当前账本准入。
+返回明文通过 `Effect.acquireRelease`/`acquireUseRelease` 接管，原生完成到登记清零责任
+之间不能被取消拆开。
 
 KEK 是持久、不可导出的原生 AES-GCM-256 CryptoKey。先保存创建意图，再生成密钥；
 marker/key/probe 读回与真实解密共同证明保护可用。每次可用性检查还在一个读写事务内

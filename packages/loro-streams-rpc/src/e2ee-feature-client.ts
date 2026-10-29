@@ -101,11 +101,14 @@ export function makeE2eeFeatureRpcClient(options: {
   const readPart = Effect.fnUntraced(function* (machineId: string, frameHex: string) {
     const frame = yield* attempt(() => unhex(frameSchema.parse(frameHex)));
     const binding = yield* options.binding(e2eeRpcResource(machineId));
-    const opened = yield* binding.openRequest(frame);
-    yield* Effect.addFinalizer(() => Effect.sync(() => opened.plaintext.fill(0)));
+    const opened = yield* Effect.acquireRelease(binding.openRequest(frame), (value) =>
+      Effect.sync(() => value.plaintext.fill(0))
+    );
     try {
-      const body = yield* attempt(() => decodeE2eeRpcRequestBody(opened.plaintext));
-      yield* Effect.addFinalizer(() => Effect.sync(() => body.params.fill(0)));
+      const body = yield* Effect.acquireRelease(
+        attempt(() => decodeE2eeRpcRequestBody(opened.plaintext)),
+        (value) => Effect.sync(() => value.params.fill(0))
+      );
       try {
         if (body.method === 'session/dispatch-turn') return null;
         if (
@@ -123,12 +126,16 @@ export function makeE2eeFeatureRpcClient(options: {
           count = view.getUint32(4);
         if (!count || count > 128 || index >= count)
           return yield* Effect.fail(new Error('e2ee_feature_part'));
+        const bytes = yield* Effect.acquireRelease(
+          Effect.sync(() => Uint8Array.from(body.params.subarray(8))),
+          (value) => Effect.sync(() => value.fill(0))
+        );
         return {
           frame,
           index,
           count,
           method: body.method,
-          bytes: Uint8Array.from(body.params.subarray(8)),
+          bytes,
           requestId: hex(body.requestId),
           requesterDevice: opened.signer,
           epoch: opened.epoch,
@@ -167,7 +174,10 @@ export function makeE2eeFeatureRpcClient(options: {
     const first = parts[0];
     if (!first || length > E2EE_FEATURE_MAX_REQUEST_BYTES)
       return yield* Effect.fail(new Error('e2ee_feature_size'));
-    const bytes = new Uint8Array(length);
+    const bytes = yield* Effect.acquireRelease(
+      Effect.sync(() => new Uint8Array(length)),
+      (value) => Effect.sync(() => value.fill(0))
+    );
     let offset = 0;
     try {
       for (const part of parts) {
@@ -340,16 +350,25 @@ export function makeE2eeFeatureRpcClient(options: {
     signer: string
   ) {
     const binding = yield* options.binding(e2eeRpcResource(request.input.request.machineId));
-    const opened = yield* binding.openResponse(frame, signer, request.epoch);
+    const opened = yield* Effect.acquireRelease(
+      binding.openResponse(frame, signer, request.epoch),
+      (value) => Effect.sync(() => value.plaintext.fill(0))
+    );
     try {
-      const response = yield* attempt(() => decodeE2eeRpcResponseBody(opened.plaintext));
+      const response = yield* Effect.acquireRelease(
+        attempt(() => decodeE2eeRpcResponseBody(opened.plaintext)),
+        (value) => Effect.sync(() => value.payload.fill(0))
+      );
       try {
         if (
           hex(response.requestId) !== request.requestId ||
           hex(response.requestDigest) !== hex(digest(request.frame))
         )
           return yield* Effect.fail(new Error('e2ee_rpc_response_binding'));
-        const page = yield* attempt(() => decodeFeatureResponsePage(response));
+        const page = yield* Effect.acquireRelease(
+          attempt(() => decodeFeatureResponsePage(response)),
+          (value) => Effect.sync(() => value.bytes.fill(0))
+        );
         return { sequence: response.sequence, page } as const;
       } finally {
         response.payload.fill(0);
@@ -388,7 +407,10 @@ export function makeE2eeFeatureRpcClient(options: {
           return yield* Effect.fail(new Error('e2ee_feature_page'));
         frames.push(frame);
       }
-      const bytes = new Uint8Array(head.page.totalBytes);
+      const bytes = yield* Effect.acquireRelease(
+        Effect.sync(() => new Uint8Array(head.page.totalBytes)),
+        (value) => Effect.sync(() => value.fill(0))
+      );
       try {
         let offset = 0;
         for (const chunk of chunks) {

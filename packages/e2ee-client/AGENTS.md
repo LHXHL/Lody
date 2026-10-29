@@ -21,7 +21,9 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Enter custody writer ownership before allocating identity and through actual
   native settlement, then release before network. Only the same fiber may reenter.
   Close fences new work, aborts network waiters and drains actual borrowed crypto;
-  late completion cannot revive closed or replaced owners.
+  late completion cannot revive closed or replaced owners. Acquire returned
+  secret buffers together with wipe registration through acquireRelease or
+  acquireUseRelease; native settlement alone does not establish cleanup ownership.
 - Replacement verifies new desktop approval, drains the old incarnation and uses
   the approved atomic archive/current switch. Preserve old pins, wrappers and
   journals. Logout, close and ordinary cache cleanup never delete identity.

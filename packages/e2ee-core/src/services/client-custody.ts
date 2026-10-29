@@ -98,7 +98,11 @@ export class ClientKeyCustody extends Context.Service<
       purpose: ClientKeyPurpose,
       body: Uint8Array
     ): Effect.Effect<Uint8Array, ClientCustodyError>;
-    /** Exact authenticated body or failure; caller owns and wipes the returned plaintext after use. */
+    /**
+     * Exact authenticated body or failure. The caller atomically acquires the
+     * returned plaintext with wipe registration (acquireRelease/acquireUseRelease),
+     * so interruption cannot abandon native output before cleanup owns it.
+     */
     unwrap(
       purpose: ClientKeyPurpose,
       blob: Uint8Array

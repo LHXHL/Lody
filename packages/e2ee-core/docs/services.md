@@ -332,6 +332,8 @@ local completion receipt; a separately verified approval original supplies autho
 `ClientIdentityOriginals.read` returns owned first identity wrappers, including
 interrupted preparation. The host requires all three and verifies real unwrap,
 key pairs and credential before ready, then rechecks current ledger admission.
+Acquire returned plaintext through `Effect.acquireRelease`/`acquireUseRelease`:
+native completion and wipe registration must share one cancellation boundary.
 
 The KEK is a native persistent nonextractable AES-GCM-256 CryptoKey. A durable
 creation intent precedes generation; marker/key/probe readback and actual decrypt

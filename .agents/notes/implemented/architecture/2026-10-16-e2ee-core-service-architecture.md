@@ -220,6 +220,12 @@ retryable; a valid retained admitted epoch remains usable when the current key i
 absent. Replacement qualifies new approval and pins before draining healthy old
 owners, then uses the approved archive/current atomic switch. Scope close fences
 and joins operations before key/credential/store release, without deleting any
-identity or uncertain original. Browser engines and desktop regressions exercise
+identity or uncertain original. Secret and RPC plaintext acquisition uses
+`acquireRelease`/`acquireUseRelease` through wipe registration: joining native work
+alone can still abandon its returned buffer when cancellation reaches the caller.
+The operation Scope owns cleanup on success, failure and interruption; close joins
+that Scope before releasing custody. This masks only finite local acquisition,
+without moving remote policy or network waits into custody ownership.
+Browser engines and desktop regressions exercise
 these contracts; minimum-OS devices, native plugins and power-loss durability
 remain separate acceptance.

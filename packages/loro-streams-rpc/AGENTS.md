@@ -11,7 +11,8 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   original store retains/readbacks before success; whole response batches are
   atomic. `./e2ee-native` only supplies the SQLite adapter. Keep finite local
   sealing/retention owned through completion and wipe plaintext on failure as well
-  as success; never put remote policy waits under that uninterruptible section.
+  as success. Acquire returned plaintext and owned decoded buffers atomically
+  with wipe registration; never put remote policy waits under that uninterruptible section.
 
 - Encrypted machine RPC uses one feature DTO/chunk codec and shared complete-response assembler.
   The closed pure-read list uses fresh read authority, never execution journals; other admitted

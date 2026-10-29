@@ -116,5 +116,9 @@ hex、installation ID、原 genesis record hex、endorser、membership。排除 
 账本所有者先于延迟创建的密钥所有者。独立密钥/repair 失败可重试，当前钥缺失时
 仍可用获准的保留 epoch。替换先验证新审批与 pin，再排空健康旧 owner，按已批准
 合同原子切换归档/current。Scope 关闭先停止接纳、等待操作，再释放密钥/credential/
-存储，不删除身份或未知原件。浏览器引擎与桌面回归验证这些合同；最低 OS 真机、
+存储，不删除身份或未知原件。秘密与 RPC 明文通过 `acquireRelease`/`acquireUseRelease`
+接管到登记清零责任；只等待原生完成，取消仍可能在返回到调用方时遗失缓冲。
+操作 Scope 在成功、失败、中断时负责清理，关闭先等该 Scope 结束，再释放 custody。
+仅有限的本地获取不可取消，不把远端策略或网络等待移入 custody 所有权。
+浏览器引擎与桌面回归验证这些合同；最低 OS 真机、
 原生插件和断电耐久仍需独立验收。
