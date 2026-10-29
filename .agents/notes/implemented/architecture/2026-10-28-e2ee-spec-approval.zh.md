@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-Owner Zixuan Chen（zxch3n）于 2026-10-28 批准所列 E2EE Spec 修订，并于 2026-10-29 批准 Web/移动端信任与保管方向。权限账本仅批准已确认或已实现部分；账本 v1 冻结前，未定格式细节须单独审查。桌面保管在产品启用前须完成真机验收。新 client custody Spec 与恢复库保持 draft。
+Owner Zixuan Chen（zxch3n）于 2026-10-28 批准所列 E2EE Spec 修订，并于 2026-10-29 批准下述 client custody Spec 确切修订。权限账本仅批准已确认或已实现部分；账本 v1 冻结前，未定格式细节须单独审查。桌面保管在产品启用前须完成真机验收。Client custody 批准确立意图，不代表平台验收；恢复库保持 draft。
 
 ## 决定
 
@@ -23,4 +23,16 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 
 2026-10-29，owner Zixuan Chen（zxch3n）通过 E2EE 总调度在实现任务中转达批准：Web 信任服务端下发代码并在界面/文档如实说明；持久不可导出 AES-GCM KEK 包装纯 JS Ed25519/X25519 密钥；手机使用设备绑定、首次解锁后可用的保护；存储丢失、重装或安装状态不明时须桌面重新审批。必须有持久保护，无明文回退或自动替换身份，账本 v1 及其字节保持不变。
 
-未选择仅靠原生曲线保管，因为浏览器/原生曲线支持不能提高 iOS/iPadOS 16.4 下限。不可导出不隔离应用代码、恶意服务端、XSS 或浏览器入侵。本记录仅含获准公开的决定范围，不含私有任务或部署记录。[Client custody Spec](../../../../specs/e2ee/client-custody.zh.md)是新 draft，仍待 owner 对具体修订批准。本授权不表示其已批准，也不表示实现、平台验收、部署或恢复库获批；桌面真实钥匙串验收仍是前置条件。
+未选择仅靠原生曲线保管，因为浏览器/原生曲线支持不能提高 iOS/iPadOS 16.4 下限。不可导出不隔离应用代码、恶意服务端、XSS 或浏览器入侵。本记录仅含获准公开的决定范围，不含私有任务或部署记录。Client custody 的确切修订批准见下文；实现、平台验收、部署和恢复库批准分别处理，桌面真实钥匙串验收仍是前置条件。
+
+## Client custody 修订批准
+
+2026-10-29，owner Zixuan Chen（zxch3n）明确批准 revision `e1e3b5a10f65d94655d097cd262f008a35c2688e` 的 client custody Spec，由 E2EE 总调度针对 [PR #2038](https://github.com/LodyAI/Lody/pull/2038)转达。[获批英文文本](https://github.com/LodyAI/Lody/blob/e1e3b5a10f65d94655d097cd262f008a35c2688e/specs/e2ee/client-custody.md)的 Git blob 为 `d2a817abf5ccf10d72496e6fa3b453ca74e37de2`；[获批中文文本](https://github.com/LodyAI/Lody/blob/e1e3b5a10f65d94655d097cd262f008a35c2688e/specs/e2ee/client-custody.zh.md)的 Git blob 为 `af4b5d9842b96101f1fa38d2cf0909780e552517`。Owner 确认以下五点范围：
+
+1. 网页应用代码可以解包并使用私钥。接受并如实披露服务端下发代码的信任边界；不可导出 KEK 不隔离这些代码。
+2. 手机保护在首次解锁后可用，不要求逐次生物识别。Android 不承诺 TEE 或 StrongBox。
+3. 仅当保留证据确认同一次中断安装时，才允许原地恢复；否则必须桌面重新审批并原子替换身份，保留旧回执和未决原件。
+4. 普通 logout 和清缓存保留身份及未决原件。
+5. 账本 v1 及其字节保持不变。Spec 批准不是实现、部署或真机验收，也不批准恢复库。
+
+该 revision 之后新增的批准元数据及链接不改变其技术正文。[当前 Spec](../../../../specs/e2ee/client-custody.zh.md)记录此批准；实际原生 Keychain/Keystore、首次解锁、最低 OS 与真机验收仍须分别提供证据。

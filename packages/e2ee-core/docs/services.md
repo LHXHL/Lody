@@ -138,7 +138,7 @@ body, so the protector needs no knowledge of the format.
 
 ### ClientKeyCustody / ClientInstallationStore
 
-These opt-in ports freeze the [Web/mobile custody draft](../../../specs/e2ee/client-custody.md)
+These opt-in ports freeze the [approved Web/mobile custody Spec](../../../specs/e2ee/client-custody.md)
 without enabling a product host. The installation store captures ClientCustodyScope
 (account, workspace, independently pinned genesis) before reading the retained
 device/installation ID. Custody then captures that complete ClientCustodyBinding

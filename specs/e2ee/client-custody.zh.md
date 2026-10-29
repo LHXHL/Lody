@@ -1,6 +1,6 @@
 # Web 与移动端个人设备保管
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#client-custody-修订批准)
 Translation: current
 
 [English](client-custody.md)
@@ -8,9 +8,8 @@ Translation: current
 既有加密工作区通过现有桌面审批流程接纳浏览器 profile 或手机安装作为个人设备。
 登录不等于设备获准。每个安装持有独立 Ed25519/X25519 密钥，同 profile 的标签与
 worker 共用一个受控安装。本 Spec 扩展平台边界，不改变账本 v1、HPKE、签名字节或
-内容格式，也不启用产品组合。[Owner 决定](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#web-与移动端保管授权)
-已批准信任与保管方向；这份新 Spec 仍需 owner 针对具体修订批准。恢复库保持 draft，
-不属于本次工作。
+内容格式，也不启用产品组合。[Owner 批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#client-custody-修订批准)
+列明获批的确切修订及范围。恢复库保持 draft，不属于本次工作。
 
 ## 信任与保护
 

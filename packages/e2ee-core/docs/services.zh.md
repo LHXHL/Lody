@@ -93,7 +93,7 @@
 
 ### ClientKeyCustody / ClientInstallationStore
 
-这两个可选端口冻结 [Web/移动端保管 draft](../../../specs/e2ee/client-custody.zh.md)，
+这两个可选端口冻结 [已批准的 Web/移动端保管 Spec](../../../specs/e2ee/client-custody.zh.md)，
 不启用产品 host。安装 store 先捕获 ClientCustodyScope（账号、工作区、独立钉住的
 genesis），再读出保留的设备与安装 ID。custody 捕获完整 ClientCustodyBinding，
 使用前必须认证该绑定。回执按一个 scope 只有一个位置，因此其他标签

@@ -1,6 +1,6 @@
 # Web and mobile personal-device custody
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
 Translation: current
 
 [中文](client-custody.zh.md)
@@ -10,9 +10,9 @@ as a personal device through the existing desktop approval flow. Login alone doe
 not admit it. Each installation owns independent Ed25519/X25519 keys; tabs and
 workers in one profile share one controlled installation. This Spec extends the
 platform boundary without changing ledger v1, HPKE, signed bytes or content formats.
-It does not enable a product composition. The [owner decision](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#web-and-mobile-custody-authorization)
-approves the trust/custody direction; this new Spec still needs revision-specific
-owner approval. Recovery vault remains draft and outside this work.
+It does not enable a product composition. The [owner approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
+identifies the exact approved revision and its scope. Recovery vault remains
+draft and outside this work.
 
 ## Trust and protection
 
