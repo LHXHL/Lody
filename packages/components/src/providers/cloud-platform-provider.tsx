@@ -28,6 +28,7 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { installGitHubTokenPort } from '@/lib/github-token-port';
 import { cloudGitHubTokenPort } from './cloud-github-token-port';
+import { installAttachmentWorkspaceAccess } from '@/lib/attachment-workspace-access';
 import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import { localAgentEnabledAtom } from '@/atoms/local-probe';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
@@ -402,6 +403,8 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     }),
     [e2eeWorkspaces, localAgentSyncMode, sessionStore, workspacesStore]
   );
+
+  useEffect(() => installAttachmentWorkspaceAccess(provider), [provider]);
 
   const memberAccountId = session.data?.user.id;
   return (
