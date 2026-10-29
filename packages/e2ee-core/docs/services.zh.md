@@ -115,7 +115,7 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 既有 identity、installed/candidate protector、账本/提交 store 及密钥/快照 journal
 保留原责任。本合同不新增密钥导出、文件访问或验签钩子。可选浏览器 crypto/IDB 适配器不启用可移植 host/runtime；
-custody 与消费者组合仍需实现及平台验收，既有桌面/CLI API 不变。
+消费者组合仍需实现及平台验收，既有桌面/CLI API 不变。
 
 共享本地包装 v1 字节及全部 CLIENT_KEY_PURPOSES 由
 [test/client-custody-vector.json](../test/client-custody-vector.json)固定，使用独立 CBOR
@@ -216,3 +216,56 @@ logout 和安装替换保留旧交换。Receive/key/outbox、repair、snapshot j
 双 tab 竞争、未知结果、原生事务故障及关闭。这是浏览器引擎证据；strict durability 仅为提示，
 WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器或用户不会清除存储；
 持久身份保护丢失仍由宿主按已批准 custody 合同处理。
+
+## 浏览器保管与安装
+
+`browserClientWriter({ accountId, workspaceId })` 在 `WorkspaceScope` 下提供
+`ClientCustodyWriter`。宿主先进入 `writer.run` 再分配安装，持有到有限的本地保护/
+存储工作真正结束，网络等待前释放。Web Lock 按 origin 内账号/工作区/genesis 跨
+标签页和 Worker 互斥，不按数据库名或设备分锁。忙时 conflict，不排队、不抢占。
+仅持锁的同一 fiber 可重入；子 fiber 必须自己拿物理锁，父 fiber 持有期间返回 conflict。
+关闭阻止新调用，等待实际原生调用结束。
+
+`indexedDbClientInstallationStore(options)` 先捕获稳定作用域，再由宿主读取身份。
+普通 CAS 保留首次安装与包装原件；只有显式 `replace` 能核对完整退休回执并原子归档、
+切换到受保护的新身份，旧 journal 和回执始终保留。阶段标签不证明审批或密钥可用。
+
+`browserClientCustody({ databaseName, binding, mode, candidateRequest? })` 消费
+安装 store 与 writer，提供 `ClientKeyCustody` 和 `ClientIdentityOriginals`。
+create 前必须持久化准备。候选创建还要求 `ClientPairingOriginalStore` 中存在精确绑定的
+请求原件，保护候选不会切换当前身份。网络/审批前，宿主将完整的包装候选包保留在该
+请求的本地完成回执；权限来自另外验真的审批原件，回执本身不是授权。
+`ClientIdentityOriginals.read` 返回拥有所有权的首次身份包装原件，包含中断准备。
+宿主必须齐备三份，实际解包并验证密钥对/credential 后才能 ready，另行核对当前账本准入。
+
+KEK 是持久、不可导出的原生 AES-GCM-256 CryptoKey。先保存创建意图，再生成密钥；
+marker/key/probe 读回与真实解密共同证明保护可用。每次可用性检查还在一个读写事务内
+修改、读回并恢复探针，被忽略的写入或只读存储不能宣称可用。安装、marker、key 或
+nonce 账本单边缺失均阻塞，不以内存或新身份降级。marker/key 均缺失时，该完整安装
+绑定的原件、journal 或 nonce 残留仍阻止创建；空状态核对和创建意图在同一事务。
+可能失败的可写/解密探针先于包装意图，已知加密前故障不留下未知占位。意图提交后，
+持续持有写者和借入缓冲，实际加密/密文保留之间不留可中断空档。加密前持久保留随机 nonce 并递增
+计数，原生加密在 IDB 事务外进行。首次密文获胜；未知意图不重新加密，同次调用保留
+的密文只能重试提交。v1 前缀/AAD 与五种用途遵循既有共享固定向量。
+`clientKeyProtectors` 分别适配 installed-epoch 与 rotation-candidate 用途。
+Web 信任下发代码使用私钥；logout/关闭/清缓存保留身份，显式作用域删除须避开替换身份并保留证据。
+
+`indexedDbClientKeyStores({ databaseName, binding, mode, maxTasks? })` 实现
+`InstalledKeyStore`、`ReceiveJournal`、`RepairJournal`、`DistributionJournal`、
+`DeliveryOutbox`、`EpochCandidateStore`。DeviceIdentity 必须匹配捕获绑定。
+首次保护 blob、frame、报告及密文获胜；CAS 只负责本地并发。收取/报告完成与消费 ACK
+分离；repair/distribution 结果保留到显式消费。候选 replace 不能产生两个未消费候选，
+也不能重写不可变发布输入。替换身份不删除旧行。适配器不验证审批、不从网络收钥、
+不发报告、不轮询邮箱，也不确认远端状态。
+
+`SnapshotPublicationJournal` 是共享本地发布端口；`indexedDbSnapshotPublication`
+按安装/resource/model 提供实现，设置明确的保留正文数量和字节预算。reserve 保留精确密文、
+signer、不透明 offset、摘要和首次 credential 时间窗。Pending 阻塞新发布；宿主负责
+串行原生 PUT 和精确读回后再 accept。accept 原子切换 current 并保留旧不可变回执，
+历史重试不能回退 current。SQLite 参考实现保持原 API 与字节。
+
+账本/原件库与客户端库采用两套固定布局，均跨身份替换保留。原生事务回调不等待密码
+或网络；写入读回行与绑定，`complete` 后报告成功。`test:browser-custody` 面向
+Safari 16.4 打包，在 Chromium/WebKit 持久 profile 中覆盖重启、固定向量、中断、
+标签页/Worker 竞争、单边缺失、nonce 丢失、忽略写入与原子替换回滚。
+strict durability 仍只是提示；这些测试不证明 iOS 16.4 真机、断电、profile 复制防护或生产验收。

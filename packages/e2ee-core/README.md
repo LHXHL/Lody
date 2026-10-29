@@ -18,16 +18,15 @@ syncs through Loro / Durable Streams or a comparable append-only log.
 The service architecture is reusable, but this is currently a private workspace
 package (`private: true`, version `0.0.0`), not a published SDK. Production E2EE
 composition is not enabled. Node SQLite, Loro Streams and opt-in browser ledger/original IndexedDB adapters
-are provided; other local stores and platform protection remain host responsibilities. Backend ports and
+are provided, together with opt-in browser custody and key/snapshot journals. Platform qualification remains a host responsibility. Backend ports and
 `/host` define what another backend must implement; they do not deploy a server.
 
 Web/mobile custody has an [approved contract](../../specs/e2ee/client-custody.md) and
-opt-in client protection/installation ports in the services entry. No browser or
-native implementation is enabled by those declarations. The opt-in browser crypto
+opt-in client protection/installation ports in the services entry. Optional adapters implement browser protection; no product host or native implementation is enabled by those declarations. The opt-in browser crypto
 adapter imports independent raw Ed25519/X25519 secrets into Scope-owned capabilities;
 it supplies no persistent protection or host admission. The IndexedDB adapter retains
 ledger origins/suffixes, pins, submission results and pairing/approval/claim originals.
-It supplies no key journals, custody, approval verification or network orchestration.
+A separate client database retains installation and key/snapshot journals; browser-custody supplies nonextractable AES-GCM protection. Approval verification and network orchestration remain host responsibilities.
 
 ## Start here
 
@@ -79,7 +78,8 @@ full verified endpoint; server hints or removed-policy high waters are insuffici
 | `@lody/e2ee-core/protocol` | the pure protocol: bytes, CBOR, ledger verification, envelopes, content format | public |
 | `@lody/e2ee-core/host` | what a backend must enforce, staging wire schemas (no Node APIs) | public |
 | `@lody/e2ee-core/adapters/browser-crypto` | Scope-owned JS Ed25519 signer and opaque X25519 handles; no storage or host enablement | public |
-| `@lody/e2ee-core/adapters/indexeddb` | account/workspace/genesis-bound ledger and original stores; no key custody | public |
+| `@lody/e2ee-core/adapters/indexeddb` | scoped ledger/original stores, installation and key/snapshot journals | public |
+| `@lody/e2ee-core/adapters/browser-custody` | single-writer, nonextractable AES-GCM KEK and wrapped originals; no host approval | public |
 | `@lody/e2ee-core/adapters/node-sqlite` | SQLite implementation of every local store, reference mailbox backend | public |
 | `@lody/e2ee-core/adapters/loro-streams` | `LedgerLog` / `LedgerFeedSource` over a Loro / Durable Streams control stream | public |
 | `@lody/e2ee-core/cloudflare` | Imported once in a Cloudflare Worker so strict Ed25519 runs in WebAssembly (workerd forbids runtime compilation); other runtimes need nothing | public |
@@ -133,7 +133,8 @@ src/
   services/                "/services" ports
   protocol/                "/protocol" pure protocol barrel
   host/                    "/host"     backend contract
-  adapters/indexeddb/      Browser ledger/pin/submission and pairing originals
+  adapters/indexeddb/      Browser ledger/original, installation, key/snapshot journals
+  adapters/browser-custody/ Scoped Web Locks and persistent AES-GCM protection
   adapters/node-sqlite/    SQLite stores, reference mailbox backend
   adapters/loro-streams/   Streams ledger log and feed source
   internal/                implementation: foundation, crypto, ledger, keys, submission
@@ -227,3 +228,7 @@ Streams adapters and the Lab use the workspace catalog version. Node hosts can s
 [KEK custody](docs/surface.md#lodye2ee-coreadaptersnode-custody) while supplying their own OS wrapper.
 
 The [pre-freeze format review](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.md) records unresolved ledger format decisions and the current-only format inventory.
+
+```sh
+pnpm --filter @lody/e2ee-core test:browser-custody
+```

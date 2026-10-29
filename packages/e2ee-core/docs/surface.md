@@ -40,8 +40,12 @@ repository's tests and the Lab, with no compatibility promise.
 | Value types   | `GenesisHash`, `SigningPublicKey`, `LedgerView`, `LedgerCheckpoint`, `LedgerReadPage`, `LedgerFeedState`, `MailboxSlot`, `EpochStagedGroup`, `EpochStagedGroupKey`                                                                                                                                                                                                                                                                  |
 | Recovery      | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
-| Client custody | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore` |
+| Client custody | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore`, `ClientCustodyWriter`, `ClientIdentityOriginals` |
 | Pairing originals | `ClientPairingPurpose`, `ClientPairingKey`, `ClientPairingOriginal`, `ClientPairingOriginalStore` |
+
+The services entry also exports `SnapshotPublicationJournal`,
+`SnapshotPublicationError`, `SnapshotPublicationIdentity`, `SnapshotPublicationRow`,
+`SnapshotPublicationOriginal`, `snapshotPublicationDigest`.
 
 ## `@lody/e2ee-core/protocol` — pure protocol
 
@@ -141,4 +145,11 @@ custody; ordinary retry grants no replacement authority.
 
 ## `@lody/e2ee-core/adapters/indexeddb`
 
-`indexedDbClientStores`, `IndexedDbStoreOptions`.
+`indexedDbClientStores`, `IndexedDbStoreOptions`, `indexedDbClientInstallationStore`,
+`indexedDbClientKeyStores`, `IndexedDbClientKeyStoreOptions`,
+`indexedDbSnapshotPublication`, `IndexedDbSnapshotPublicationOptions`.
+
+## `@lody/e2ee-core/adapters/browser-custody`
+
+`browserClientWriter`, `BrowserClientWriterOptions`, `browserClientCustody`,
+`BrowserClientCustodyOptions`, `clientKeyProtectors`.

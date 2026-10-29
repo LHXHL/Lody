@@ -179,3 +179,15 @@ open callbacks cannot revive a closed owner. No transaction waits on crypto or
 network. The [service guide](services.md#browser-ledger-and-original-stores)
 explains routing, CAS and original retention; the owning architecture note records
 the rejected per-device database reset.
+
+## Browser persistent protection
+
+The optional browser-custody Layer provides a scope-wide finite writer, persistent
+nonextractable AES-GCM protection and read-only identity originals. The host enters
+exclusion before allocation and releases it before network waits; closing drains
+actual admitted calls, including native work that outlives cancellation. Short IDB
+callbacks retain intent/nonce before crypto and exact ciphertext after it. Two
+stable database layouts separate ledger/originals from installation, KEK metadata,
+key and snapshot journals without erasing either on replacement. These are local
+concurrency/recovery evidence, never another ledger or approval cache.
+See [custody and installation](services.md#browser-custody-and-installation).

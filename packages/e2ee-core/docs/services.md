@@ -180,7 +180,7 @@ scoped hard reset or authenticated terminal removal after drain.
 The existing identity, installed/candidate protectors, ledger/submission stores and
 key/snapshot journals keep their responsibilities. This contract adds no key-export,
 file-access or verifier hook. The opt-in browser crypto/IDB adapters do not enable a portable host/runtime;
-custody and consumer composition still require implementation and platform acceptance. Existing desktop
+consumer composition still requires implementation and platform acceptance. Existing desktop
 and CLI APIs remain unchanged.
 
 Shared local-wrapping v1 bytes and all CLIENT_KEY_PURPOSES are pinned by
@@ -304,3 +304,76 @@ faults and close. This is browser-engine evidence; strict durability is only a h
 WebKit tests do not replace iOS 16.4 real-device or power-loss acceptance. There is no
 guarantee against user/browser eviction; loss of persistent identity protection
 must be handled by the host under the approved custody contract.
+
+## Browser custody and installation
+
+`browserClientWriter({ accountId, workspaceId })` provides `ClientCustodyWriter`
+under `WorkspaceScope`. Enter `writer.run` before allocating an installation, hold
+it through finite local protection/storage work, and release before network waits.
+The origin's Web Lock binds account/workspace/genesis across tabs and workers,
+independent of database/device names. Busy fails conflict without queueing or
+stealing. Reentry is limited to the holding fiber; a child fiber must acquire its
+own lease and fails conflict while the parent holds it. Close fences new calls
+and waits for actual native settlement.
+
+`indexedDbClientInstallationStore(options)` captures the stable scope before the
+host knows its device. Ordinary CAS retains the first incarnation and wrapped
+identity originals. Only explicit `replace` archives an exact retired receipt and
+selects a protected replacement atomically; it preserves old journals and receipts.
+Receipt phases are not approval or proof that a key is usable.
+
+`browserClientCustody({ databaseName, binding, mode, candidateRequest? })` consumes
+the installation store and writer, providing `ClientKeyCustody` and
+`ClientIdentityOriginals`. Persist preparation before create. Candidate creation
+requires a durable `ClientPairingOriginalStore` request for that exact binding;
+creating/protecting it does not change the current identity. Before network or
+approval, the host retains the complete wrapped candidate bundle in the request's
+local completion receipt; a separately verified approval original supplies authority.
+`ClientIdentityOriginals.read` returns owned first identity wrappers, including
+interrupted preparation. The host requires all three and verifies real unwrap,
+key pairs and credential before ready, then rechecks current ledger admission.
+
+The KEK is a native persistent nonextractable AES-GCM-256 CryptoKey. A durable
+creation intent precedes generation; marker/key/probe readback and actual decrypt
+qualify it. Availability also changes, reads back and restores a probe in one
+readwrite transaction: ignored writes/read-only storage cannot report usable.
+Missing marker, key, installation or nonce ledger blocks; no memory fallback or
+implicit new identity. When marker/key are both absent, scoped original, journal
+and nonce records still prevent creation; the empty-state check shares the intent
+transaction. The fallible writable/decrypt probes run before wrapping intent
+reservation, so a known pre-encryption fault leaves no unknown placeholder. Once
+reserved, actual encryption/ciphertext settlement finishes without an interruption
+gap while retaining the writer and borrowed buffers. Each nonce is reserved with a monotonic count before native
+encryption outside IDB. First ciphertext wins; an unknown intent never encrypts
+again. A same-operation retained ciphertext may retry only its commit. The v1
+prefix/AAD and all five purposes use the shared fixed vector unchanged.
+`clientKeyProtectors` adapts installed-epoch and rotation-candidate purposes.
+Web trusts served code to use private keys. Logout/close/cache cleanup preserve
+identity; explicit scoped deletion spares replacements and retains evidence.
+
+`indexedDbClientKeyStores({ databaseName, binding, mode, maxTasks? })` implements
+`InstalledKeyStore`, `ReceiveJournal`, `RepairJournal`, `DistributionJournal`,
+`DeliveryOutbox`, and `EpochCandidateStore`. DeviceIdentity must match the captured
+binding. First protected blobs, frames, reports and ciphertexts win; CAS is local
+concurrency control. Receive/report completion is separate from consumption ACK;
+repair/distribution results remain until explicit consumption. Candidate replace
+cannot create two unconsumed candidates or rewrite immutable publication inputs.
+All original rows survive incarnation replacement. No adapter verifies approval,
+installs a network key, sends reports, polls mailbox or acknowledges remote state.
+
+`SnapshotPublicationJournal` is the shared local publication port;
+`indexedDbSnapshotPublication` implements it per incarnation/resource/model with
+explicit retained-body count/byte budgets. Reserve retains exact ciphertext, signer, opaque offset,
+digest and first credential window. Pending blocks new publication. The host owns
+serialized native PUT and exact readback before accept. Accept atomically selects
+current and retains old immutable receipts; historical retries cannot rewind it.
+The SQLite reference retains its existing API and bytes.
+
+The ledger/original database and client database have separate fixed layouts,
+both stable across identity replacement. Native transaction callbacks never await
+crypto/network; writes read back their rows and binding before `complete` reports
+success. `test:browser-custody` bundles for Safari 16.4 and covers Chromium/WebKit
+persistent-profile reopen, exact vectors, interruptions, competing tabs/workers,
+missing halves, nonce loss, ignored writes and atomic replacement rollback.
+Strict durability remains a hint. These tests do not establish iOS 16.4 real-device,
+power-loss, profile-copy resistance or production acceptance.

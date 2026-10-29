@@ -2,13 +2,13 @@
 
 Status: implemented
 Translation: current
-PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2053)
+PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2053) · [Browser custody/key journals #2060](https://github.com/LodyAI/Lody/pull/2060)
 
 [English](2026-10-16-e2ee-core-service-architecture.md)
 
 ## 摘要
 
-`@lody/e2ee-core` 原先暴露约二十个工厂函数：每个都自己打开 SQLite 文件、以裸回调接入远端系统，并各自维护一份回滚钉。这让库难以在 Lody 之外复用、难以阅读，也无法换用别的后端或存储。现在核心拆为端口（由应用提供的 Effect service）、流程（库在端口之上以 Layer 实现的 service）和适配器，通过按角色划分的入口加不稳定的 `./internal` 暴露。Node SQLite、浏览器账本/原件 IndexedDB、JS 曲线和 Loro Streams 适配器分别提供能力；存储不授予权限。协议字节和流程保证仍归既有 core，浏览器持久密钥保护与产品组合独立于这些存储和密码适配器。
+`@lody/e2ee-core` 原先暴露约二十个工厂函数：每个都自己打开 SQLite 文件、以裸回调接入远端系统，并各自维护一份回滚钉。这让库难以在 Lody 之外复用、难以阅读，也无法换用别的后端或存储。现在核心拆为端口（由应用提供的 Effect service）、流程（库在端口之上以 Layer 实现的 service）和适配器，通过按角色划分的入口加不稳定的 `./internal` 暴露。Node SQLite、浏览器账本/原件 IndexedDB、JS 曲线和 Loro Streams 适配器分别提供能力；存储不授予权限。协议字节和流程保证仍归既有 core，产品组合独立于这些存储、密码与可选持久保管适配器。
 
 ## 问题
 
@@ -22,7 +22,7 @@ PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2
 1. **端口**（`./services`）：后端（`LedgerLog`、`LedgerFeedSource`、`KeyMailbox`、`EpochStagingStore`）、平台（`DeviceIdentity`、`KeyProtector`、`CandidateProtector`）、应用（`WorkspaceScope`、`LedgerViewSource`、`EpochPublicationSource`）和本地存储（每个日志或存储一个端口）。端口带有类型化错误（`BackendError`、`LocalStoreError` 等）与 JSDoc 合同。
 2. **流程**（`.`）：`VerifiedLedger`、`LedgerFeed`、`LedgerSubmission`、`InstalledEpochKeys`、`InstalledEpochHistory`、`KeyReceiver`、`KeyRepair`、`KeyDistributor`、`EpochPublisher`，均为带 `layer` 的 `Context.Service`，只依赖端口和协议代码；`E2eeWorkflows` 负责组合。
 3. **唯一的回滚守卫。** `VerifiedLedger` 加一个 `LedgerPinStore` 取代各存储自带的钉；钉故障测试集中到一个归属测试套件。
-4. **适配器**通过独立入口实现端口，每次存储写入都在同一事务内读回校验自身写入与捕获的绑定，被忽略或不一致的写入会中止事务。SQLite 仍是全部本地端口的参考实现；IndexedDB 仅提供账本/pin/提交及配对原件。
+4. **适配器**通过独立入口实现端口，每次存储写入都在同一事务内读回校验自身写入与捕获的绑定，被忽略或不一致的写入会中止事务。SQLite 仍是全部本地端口的参考实现；IndexedDB 还提供安装、密钥及快照 journal；浏览器保管由独立的可选适配器提供。
 5. **后端合同**（`./host`）：以 Effect Schema 定义的暂存 DTO、请求签名字节和暂存请求校验，以及邮箱规则函数。平台无关；`@lody/cloud-api` 改为重新导出暂存合同，不再自行定义。
 6. **Effect 实践。** 公开方法使用 `Effect.fn` 产生 span；内部辅助使用 `Effect.fnUntraced`；只包 `Effect.gen` 的函数改为 `Effect.fnUntraced`；各流程声明完整的失败联合类型。
 
@@ -63,7 +63,7 @@ IndexedDB 保留一个稳定的账号/工作区/genesis 数据库；配对行额
 关闭拒绝新工作并等待真实事务 Promise；未知结果从保留的首份字节核对。
 不通过备用数据库或隐式 reset 恢复可用性。宿主须独立限定 retained 账本状态、
 验证审批，在入库前保护配对中的秘密，并按[custody 合同](../../../../specs/e2ee/client-custody.zh.md)
-处理持久保护丢失。Receive/epoch/mailbox/outbox/repair/snapshot journal 仍为独立能力。
+处理持久保护丢失。独立稳定客户端布局现已保留安装、receive/report、installed/candidate、distribution/outbox/repair 与快照发布 journal。store 不执行远端邮箱操作或审批验证。
 
 ## 验证
 
@@ -74,3 +74,21 @@ profile，覆盖进程重开、双 tab 竞争、原生 abort/配额/写入不一
 验证精确原件保留、记录/游标原子回滚及限定 retained 状态的重开。
 这些合成浏览器引擎检查不代表最低 OS、真机或生产验收。包仍为 private、
 版本 0.0.0；可复用边界不代表已发布独立 SDK 或已启用产品 host。
+
+## 浏览器保管理由
+
+没有采用标签页全生命周期锁：空闲保护工作不应阻塞其他窗口。宿主在分配身份前进入
+作用域内有限 Web Lock，持有到真实本地/原生调用结束，网络等待前释放。按数据库或
+设备分锁会容许竞争安装；取消时抢锁会让尚未结束的原生工作与新写者重叠。
+因此重入核对真实持锁 fiber，而不只看继承的 Context；子 fiber 自己拿锁。有限本地
+序列无需并行写者，给所有后代增加借用计数会引入额外的所有权机制。
+
+单独保存不可导出 key 不足以证明持久可用：创建意图、key/probe 读回、实际解密与事务
+内写入/读回/恢复共同建立证明。只要该安装分区仍有原件、nonce 或 journal，marker/key
+同时缺失也不代表首次安装；创建事务核对全部绑定分区。会失败的可用性探针先于包装
+意图，因而加密前的临时配额故障可重试。意图提交后，原生加密和密文保留不可中断；
+进程崩溃或真实未知结果仍不能作为新加密重试。加密前保留 nonce 和计数，未知结果不能触发第二次
+加密。完成原件按精确字节恢复，歧义半成品保持阻塞。作用域安装指针与退休归档原子
+切换，桌面批准替换后仍保留旧 journal。首次包装候选归待决请求的本地完成回执，
+本地完成不等于桌面审批。浏览器引擎测试覆盖这些边界与全部固定用途，但不证明最低
+OS 硬件或断电验收。已批准 Spec 与账本 v1 均不变。

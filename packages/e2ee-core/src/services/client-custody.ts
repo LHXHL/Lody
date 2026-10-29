@@ -113,11 +113,45 @@ export class ClientKeyCustody extends Context.Service<
   }
 >()('@lody/e2ee-core/ClientKeyCustody') {}
 
+/**
+ * One account/workspace/genesis single-writer capability. The host enters it
+ * before allocating an installation and holds it through actual protection work.
+ * It supplies exclusion, never approval. Busy fails conflict, without stealing a
+ * live writer or guessing that a cancelled waiter stopped native operations.
+ * @category Platform ports
+ */
+export class ClientCustodyWriter extends Context.Service<
+  ClientCustodyWriter,
+  {
+    /** Captured routing scope shared by all incarnations. */
+    readonly scope: ClientCustodyScope;
+    /** Run finite local work with exclusive ownership; release after actual native calls settle and before any network wait. */
+    run<A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<A, E | ClientCustodyError, R>;
+  }
+>()('@lody/e2ee-core/ClientCustodyWriter') {}
+
 /** A local authenticated wrapper, never unprotected key material or a wire-format envelope. */
 export interface ClientWrappedKey {
   readonly purpose: Exclude<ClientKeyPurpose, 'installed-epoch-key' | 'rotation-candidate'>;
   readonly blob: Uint8Array;
 }
+
+/**
+ * First durable identity wrappers produced by the platform custody adapter,
+ * including a partially completed installation. This read-only port grants no
+ * approval and cannot create a key, replace a wrapper or select current identity.
+ * A pending/unknown protection result fails indeterminate; never re-wrap it.
+ * @category Platform ports
+ */
+export class ClientIdentityOriginals extends Context.Service<
+  ClientIdentityOriginals,
+  {
+    /** Exact local incarnation whose original wrappers are retained. */
+    readonly binding: ClientCustodyBinding;
+    /** Owned first wrappers; the host requires all three and verifies actual key pairs/credential before ready. */
+    read(): Effect.Effect<readonly ClientWrappedKey[], ClientCustodyError>;
+  }
+>()('@lody/e2ee-core/ClientIdentityOriginals') {}
 
 /**
  * Recoverable local installation receipt, not approval evidence. prepared is
