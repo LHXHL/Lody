@@ -21,7 +21,7 @@ platform/cloud-api 定义对应 CAS DTO。这些原语
 说明待批准 Spec 增量与后续宿主职责。
 
 Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.md)及 services 入口的
-可选客户端保护/安装端口。这些声明不启用浏览器或原生实现。
+可选客户端保护/安装端口。可选适配器实现浏览器保护；这些声明不启用产品宿主或原生实现。
 
 ## 从这里开始
 
@@ -111,7 +111,8 @@ src/
   services/                "/services" 端口
   protocol/                "/protocol" 纯协议汇总
   host/                    "/host"     后端合同
-  adapters/indexeddb/      浏览器账本/pin/提交与配对原件
+  adapters/indexeddb/      浏览器账本/原件、安装与密钥/快照 journal
+  adapters/browser-custody/ 按作用域的 Web Locks 与持久 AES-GCM 保护
   adapters/node-sqlite/    SQLite 存储、参考邮箱后端
   adapters/loro-streams/   Streams 账本日志与 feed 源
   internal/                实现：foundation、crypto、ledger、keys、submission
@@ -176,4 +177,10 @@ Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可�
 签名器和不透明 X25519 句柄。它不提供持久保护、设备批准或运行时启用。
 
 IndexedDB 适配器保存账本起点/后缀、pin、提交结果及配对/审批/claim 原件；
-不提供密钥 journal、custody、审批验证或网络编排。
+独立客户端数据库保留安装与密钥/快照 journal，browser-custody 提供不可导出的 AES-GCM 保护。审批验证与网络编排仍归宿主。
+
+`@lody/e2ee-core/adapters/browser-custody` 提供写者互斥、持久 KEK 与包装原件；不授予设备权限。详见[服务说明](docs/services.zh.md#浏览器保管与安装)。
+
+```sh
+pnpm --filter @lody/e2ee-core test:browser-custody
+```

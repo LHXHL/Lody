@@ -14,7 +14,8 @@
     "./cloudflare": "./src/cloudflare/index.ts",
     "./internal": "./src/internal/index.ts",
     "./adapters/browser-crypto": "./src/adapters/browser-crypto/index.ts",
-    "./adapters/indexeddb": "./src/adapters/indexeddb/index.ts"
+    "./adapters/indexeddb": "./src/adapters/indexeddb/index.ts",
+    "./adapters/browser-custody": "./src/adapters/browser-custody/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -23,7 +24,8 @@
     "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.ts'",
     "check:docs": "tsx scripts/check-public-docs.ts",
     "test:browser-crypto": "vitest run --config vitest.browser.config.ts",
-    "test:browser-idb": "vitest run --config vitest.idb.config.ts"
+    "test:browser-idb": "vitest run --config vitest.idb.config.ts",
+    "test:browser-custody": "vitest run --config vitest.custody.config.ts"
   },
   "dependencies": {
     "@hpke/chacha20poly1305": "1.8.0",

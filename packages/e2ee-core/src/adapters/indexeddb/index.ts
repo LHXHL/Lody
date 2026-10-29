@@ -899,3 +899,10 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
     })
   );
 };
+
+export { indexedDbClientInstallationStore } from './client-installation';
+export { indexedDbClientKeyStores, type IndexedDbClientKeyStoreOptions } from './client-key-stores';
+export {
+  indexedDbSnapshotPublication,
+  type IndexedDbSnapshotPublicationOptions,
+} from './client-snapshots';

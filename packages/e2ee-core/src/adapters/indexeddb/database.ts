@@ -19,8 +19,28 @@ export type BoundScope = {
   readonly genesis: string;
 };
 export type Transaction = {
-  readonly store: (table: (typeof TABLES)[number]) => IDBObjectStore;
+  readonly store: (table: string) => IDBObjectStore;
   readonly request: <A>(request: IDBRequest<A>, next: (value: A) => void) => void;
+};
+
+/** Fixed adapter-owned schema; initialization is synchronous native IDB work only. */
+export interface DatabaseLayout {
+  readonly tables: readonly string[];
+  readonly initialize: (tx: IDBTransaction) => void;
+}
+const ledgerLayout: DatabaseLayout = {
+  tables: TABLES,
+  initialize: (tx) => {
+    tx.objectStore('pin').put({ version: 1, revision: 0, checkpoint: null }, 0);
+    tx.objectStore('feed').put(
+      { version: 1, revision: 0, origin: null, originCount: 0, tail: null },
+      0
+    );
+    tx.objectStore('submission').put(
+      { version: 1, revision: 0, record: null, outcome: null, checkpoint: null },
+      0
+    );
+  },
 };
 
 /** One Scope's IDB connection. No request callback awaits external work. */
@@ -34,7 +54,8 @@ export class DatabaseOwner {
   constructor(
     readonly scope: BoundScope,
     readonly name: string,
-    readonly mode: 'create-or-open' | 'open-existing'
+    readonly mode: 'create-or-open' | 'open-existing',
+    private readonly layout: DatabaseLayout = ledgerLayout
   ) {}
 
   readonly open = Effect.tryPromise({
@@ -61,18 +82,10 @@ export class DatabaseOwner {
             return;
           }
           const db = request.result;
-          for (const name of TABLES) db.createObjectStore(name);
+          for (const name of this.layout.tables) db.createObjectStore(name);
           const tx = request.transaction!;
           tx.objectStore('meta').put({ version: 1, ...this.scope }, 0);
-          tx.objectStore('pin').put({ version: 1, revision: 0, checkpoint: null }, 0);
-          tx.objectStore('feed').put(
-            { version: 1, revision: 0, origin: null, originCount: 0, tail: null },
-            0
-          );
-          tx.objectStore('submission').put(
-            { version: 1, revision: 0, record: null, outcome: null, checkpoint: null },
-            0
-          );
+          this.layout.initialize(tx);
         };
         request.onsuccess = () => {
           this.opening = undefined;
@@ -85,8 +98,8 @@ export class DatabaseOwner {
           }
           if (
             db.version !== 1 ||
-            TABLES.length !== db.objectStoreNames.length ||
-            TABLES.some((name) => !db.objectStoreNames.contains(name))
+            this.layout.tables.length !== db.objectStoreNames.length ||
+            this.layout.tables.some((name) => !db.objectStoreNames.contains(name))
           ) {
             db.close();
             reject(failure('IndexedDbClientStores', 'corrupt'));
@@ -123,7 +136,7 @@ export class DatabaseOwner {
   /** Callback requests and final binding readback share one transaction; only complete resolves success. */
   run<A>(
     name: string,
-    tables: readonly (typeof TABLES)[number][],
+    tables: readonly string[],
     mode: IDBTransactionMode,
     checkBinding: (value: unknown) => void,
     work: (transaction: Transaction, finish: (value: A) => void) => void

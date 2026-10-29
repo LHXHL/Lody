@@ -17,7 +17,7 @@ library implements as Layers on those ports only) and adapters, behind role-base
 entries plus an unstable `./internal`. Node SQLite, browser ledger/original
 IndexedDB, JS curves and Loro Streams adapters implement separate capabilities;
 storage never grants authority. Protocol bytes and workflow guarantees stay with
-the existing core. Persistent browser key protection and product composition remain
+the existing core. Product composition remains
 separate from these storage and crypto adapters.
 
 ## Problem
@@ -50,7 +50,7 @@ separate from these storage and crypto adapters.
 4. **Adapters** implement ports behind separate entries. Store mutations verify
    their own write and captured binding inside the same transaction, so an ignored
    or mismatched write aborts. SQLite remains the reference for all local ports;
-   IndexedDB supplies only ledger/pin/submission and pairing originals.
+   IndexedDB also supplies installation, key and snapshot journals; browser custody is a separate opt-in adapter.
 5. **Backend contract** (`./host`): staging DTOs as Effect Schemas, request
    signing bytes and stage-request checks, plus the mailbox rule functions.
    Platform-neutral; `@lody/cloud-api` re-exports the staging contract instead
@@ -147,7 +147,7 @@ retained first bytes. No fallback database or implicit reset restores availabili
 The host must independently requalify retained ledger state and verify approval,
 protect secret pairing material before storage, and handle loss of persistent
 protection under the [custody contract](../../../../specs/e2ee/client-custody.md).
-Receive/epoch/mailbox/outbox/repair/snapshot journals remain a separate capability.
+The separate stable client layout now retains installation, receive/report, installed/candidate, distribution/outbox/repair and snapshot publication journals. No store performs remote mailbox operations or approval verification.
 
 ## Verification
 
@@ -160,3 +160,22 @@ record/cursor rollback and qualified retained-state reopen. These synthetic
 browser-engine checks do not establish minimum-OS, real-device or production
 acceptance. The package remains private at `0.0.0`; reusable boundaries do not
 publish a standalone SDK or enable a product host.
+
+## Browser custody rationale
+
+A lifetime tab lock was rejected because idle protected work must not block other
+windows. The host instead enters a scope-wide finite Web Lock before identity
+allocation, holds it through real local/native settlement, then releases before
+network waits. Database/device-specific locks would admit competing installations;
+stealing on cancellation would let unfinished native work overlap its successor.
+
+A nonextractable key alone is insufficient: a retained creation intent, key/probe
+readback, actual decrypt and transactional write/readback/restore establish usable
+persistent protection. Nonce reservation/count precedes native encryption, so an
+unknown result cannot trigger a second encryption. Completed originals reconcile
+exactly; ambiguous partials stay blocked. The scope-wide installation pointer and
+retired archive remain atomic, retaining old journals across desktop-approved
+replacement. The first wrapped candidate belongs to the pending request receipt;
+that local completion is never desktop approval. Browser-engine tests cover these
+boundaries and all fixed purposes, but do not prove minimum-OS hardware or power-loss
+acceptance. The approved Spec and ledger v1 remain unchanged.

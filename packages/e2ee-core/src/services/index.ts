@@ -99,3 +99,16 @@ export {
   type ClientPairingOriginal,
   type ClientPairingPurpose,
 } from './client-pairing';
+
+export { ClientCustodyWriter } from './client-custody';
+
+export {
+  SnapshotPublicationJournal,
+  SnapshotPublicationError,
+  snapshotPublicationDigest,
+  type SnapshotPublicationRow,
+  type SnapshotPublicationIdentity,
+  type SnapshotPublicationOriginal,
+} from './snapshot-publication';
+
+export { ClientIdentityOriginals } from './client-custody';

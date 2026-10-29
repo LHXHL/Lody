@@ -10,7 +10,7 @@ whitepaper, Specs, decisions and this package's docs. Contract:
 ## Structure
 
 - Entries are exactly `.` (workflows), `./services` (ports), `./protocol`,
-  `./host`, `./adapters/node-custody`, `./adapters/browser-crypto`, `./adapters/indexeddb`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
+  `./host`, `./adapters/node-custody`, `./adapters/browser-crypto`, `./adapters/browser-custody`, `./adapters/indexeddb`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
   (bundle-time WebAssembly for workerd) and the unstable `./internal`. Add an export only to the entry whose role it serves.
 - Protocol code is pure (Result, plus Effect only for async crypto/verification)
   and imports no service or adapter. Workflows depend only on protocol code and
@@ -109,6 +109,11 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   admitted native transactions. Missing/corrupt existing storage never resets a pin.
   Rebase validates the entire contiguous suffix, record shape and count/byte totals
   before deleting covered rows in the same transaction.
+- Client hosts enter `ClientCustodyWriter.run` before allocating an identity and
+  hold it through finite local protection/storage work, releasing before network.
+  `ClientIdentityOriginals` supplies retained wrappers, never approval; authenticate
+  keys before ready. Read the adapter rules for [custody](src/adapters/browser-custody/AGENTS.md)
+  and [IndexedDB](src/adapters/indexeddb/AGENTS.md) before changing those boundaries.
 - Tests use fixed synthetic vectors, real SQLite and crypto, explicit signals;
   never captured transcripts, real keychains or private designs.
 - TypeScript Worker fixtures preload `test/worker-loader.mjs` to register tsx

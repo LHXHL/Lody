@@ -382,11 +382,32 @@ jobs:
       - name: Verify IndexedDB persistence, CAS and failure rollback
         run: pnpm --filter @lody/e2ee-core test:browser-idb
 
+  e2ee-browser-custody:
+    name: E2EE browser custody
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install custody acceptance dependencies
+        run: pnpm --filter @lody/e2ee-core... install --frozen-lockfile --ignore-scripts
+      - name: Install Chromium and WebKit
+        run: pnpm --filter @lody/e2ee-core exec playwright install --with-deps chromium webkit
+      - name: Verify persisted KEK, installation recovery, journals and exclusion
+        run: pnpm --filter @lody/e2ee-core test:browser-custody
+
   # Stable required check: green only when every group succeeded.
   # Cancellation supersedes this run; do not turn cancelled groups into a failure.
   tests:
     name: Tests
-    needs: [test-groups, e2ee-signature-vectors, e2ee-browser-crypto, e2ee-browser-idb]
+    needs: [test-groups, e2ee-signature-vectors, e2ee-browser-crypto, e2ee-browser-idb, e2ee-browser-custody]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -397,9 +418,11 @@ jobs:
           SIGNATURE_RESULT: ${{ needs.e2ee-signature-vectors.result }}
           BROWSER_CRYPTO_RESULT: ${{ needs.e2ee-browser-crypto.result }}
           BROWSER_IDB_RESULT: ${{ needs.e2ee-browser-idb.result }}
+          BROWSER_CUSTODY_RESULT: ${{ needs.e2ee-browser-custody.result }}
         run: |
           echo "Test groups: $RESULT"
           [ "$RESULT" = "success" ]
           [ "$SIGNATURE_RESULT" = "success" ]
           [ "$BROWSER_CRYPTO_RESULT" = "success" ]
           [ "$BROWSER_IDB_RESULT" = "success" ]
+          [ "$BROWSER_CUSTODY_RESULT" = "success" ]
