@@ -37,7 +37,8 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   Preserve mounted routes and local data.
   [Contract](../../../../specs/auth-recovery.md).
 
-- Session ACP catalogs use bound Provider runtime overrides.
+- Provider overrides govern model catalogs and command previews. Sessions own actual commands.
+
 
 - History uses SessionData commands.
 - Existing-session run-config drafts store only edited fields, scoped to account,
