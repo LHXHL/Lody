@@ -121,6 +121,7 @@ type LspRequest = {
 };
 
 export type WorkspaceMachineRpcFacadeDeps = {
+  waitForContentAdmission?: () => Promise<void>;
   requestEncryptedFeature?: (
     request: LocalMachineRpcRequest
   ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>;
@@ -142,14 +143,23 @@ const toCodeCollabTransportError = (error: unknown): CodeCollabV2Error => ({
   retryable: true,
 });
 
-const getLocalMachineRpcSender = (): LocalMachineRpcSender | undefined =>
+const getPlatformLocalMachineRpcSender = (): LocalMachineRpcSender | undefined =>
   getIpcServices()?.machineRpc.send;
 
 export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeDeps) {
   const { workspaceId, targetRouter, getMachineRpcClient } = deps;
+  const getLocalMachineRpcSender = (): LocalMachineRpcSender | undefined => {
+    const sender = getPlatformLocalMachineRpcSender();
+    if (!sender) return undefined;
+    return async (request) => {
+      await deps.waitForContentAdmission?.();
+      return sender(request);
+    };
+  };
   const codeCollabDiffRpcGate = createAsyncConcurrencyGate(CODE_COLLAB_DIFF_RPC_CONCURRENCY_LIMIT);
 
   const waitForMachineRoute = async (machineId: MachineId): Promise<void> => {
+    await deps.waitForContentAdmission?.();
     if (targetRouter.getPlaneForMachine(machineId) !== null) return;
     try {
       await targetRouter.resolvePlaneForMachine(machineId, {
@@ -165,6 +175,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     options?: { timeoutMs?: number }
   ): Promise<'local' | 'cloud'> => {
+    await deps.waitForContentAdmission?.();
     const existing = targetRouter.getPlaneForMachine(machineId);
     if (existing) return existing;
     return await targetRouter.resolvePlaneForMachine(machineId, {
@@ -173,6 +184,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   };
 
   const canUseLocalMachineRpc = async (machineId: MachineId): Promise<boolean> => {
+    await deps.waitForContentAdmission?.();
     if (deps.isLocalControlMachine?.(machineId)) {
       if (typeof window === 'undefined' || !window.__LODY_ELECTRON__ || !getLocalMachineRpcSender())
         throw new Error('Local Machine RPC is not available.');
@@ -190,6 +202,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   const sendLocalMachineRpcRequest = async (
     request: LocalMachineRpcRequest
   ): Promise<LocalMachineRpcResult | CodeCollabV2Error | null> => {
+    await deps.waitForContentAdmission?.();
     const sender = getLocalMachineRpcSender();
     if (!sender) {
       return toCodeCollabTransportError(new Error('Local Machine RPC is not available.'));

@@ -80,6 +80,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
+- Unknown workspace mode permits local Repo access, never ordinary body egress.
+  Preserve drafts until authenticated classification; retire and cancel provisional
+  transports before recording an encrypted or contradictory verdict.
 - Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
   leases. No plaintext bypass. Keep retained-epoch sends; select confirmed keys per
   operation. Forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.

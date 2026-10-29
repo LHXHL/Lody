@@ -251,6 +251,9 @@ export type WorkspaceE2eeTransport = {
 };
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
+  /** Provisional cloud runtimes may read/write locally, but cannot attach a
+   * transport or send a body until their immutable mode is authenticated. */
+  waitForContentAdmission?: (signal: AbortSignal) => Promise<void>;
   e2ee?: WorkspaceE2eeTransport;
   e2eeLocalIdentity?: E2eeLocalDataIdentity;
   /** Cancels an initialization retired by the provider before publication. */
@@ -501,6 +504,13 @@ function createPendingResponseRegistry<T>(defaultTimeoutMs: number) {
 
 export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<WorkspaceRuntime> {
   deps.signal?.throwIfAborted();
+  const egressAbort = new AbortController();
+  const waitForContentAdmission = async (signal?: AbortSignal) => {
+    const owned = signal ? AbortSignal.any([signal, egressAbort.signal]) : egressAbort.signal;
+    owned.throwIfAborted();
+    await deps.waitForContentAdmission?.(owned);
+    owned.throwIfAborted();
+  };
   const protectedContent = deps.content.mode === 'protected';
   if (protectedContent && !deps.e2ee) throw new Error('e2ee_transport_unavailable');
   if (
@@ -589,6 +599,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   });
   resolveRoomTransportsImpl = (room) => targetRouter.resolveTransportRoute(room);
   let localTransportAttachPromise: Promise<void> | null = null;
+  let localStartupPromise: Promise<void> | null = null;
+  let initialTokenAttachPromise: Promise<void> | null = null;
   let localLoroTransport: LocalLoroTransportAdapter | null = null;
   let localMachineMonitorTransport: WorkspaceLocalMachineMonitorTransport | null = null;
   let localDataPlaneConnectionDispose: (() => void) | null = null;
@@ -1784,6 +1796,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy;
     streamsBaseUrl: string;
   }> => {
+    await waitForContentAdmission();
     if (!cloudPlaneEnabled) {
       throw new Error('Streams RPC is disabled in local-only sync mode');
     }
@@ -1925,6 +1938,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getMachineRpcClient = async (
     machineId: MachineId
   ): Promise<LoroStreamsMachineRpcClient> => {
+    await waitForContentAdmission();
     if (protectedContent) {
       if (
         !deps.e2ee?.prepareFeatureRpc ||
@@ -2030,6 +2044,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestMemoryProvider,
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
+    waitForContentAdmission,
     getSessionToken: () => authToken,
     ...(protectedContent
       ? { isLocalControlMachine: (machineId: MachineId) => machineId === sendLocalMachineId }
@@ -2574,6 +2589,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     try {
+      await waitForContentAdmission();
       const streamedProgressCounts = new Map<string, number>();
       const result = await sendLocalSessionControl(message, (payload) => {
         const validated = ServerToClientSchema.safeParse(payload);
@@ -3197,6 +3213,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const attachLocalLoroDataPlaneTransport = async () => {
+    await waitForContentAdmission();
     if (transportAttached) {
       return;
     }
@@ -3261,6 +3278,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       workspaceId,
     });
     emitControlConnectionState();
+  };
+
+  const ensureLocalTransport = async () => {
+    // A failed classification has acquired no local transport. A later valid
+    // verdict may start it on this same Repo; actual I/O remains single-flight.
+    await waitForContentAdmission();
+    localTransportAttachPromise ??= (async () => {
+      await attachLocalLoroDataPlaneTransport();
+      await ensureMetaRoomSynced();
+    })();
+    await localTransportAttachPromise;
   };
 
   const createStreamsDurableTransport = (
@@ -3859,9 +3887,28 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     });
   };
 
+  let authAdmissionGeneration = 0;
+  let authAdmissionAbort: AbortController | null = null;
   const setAuthToken = async (token: string | null) => {
+    const generation = ++authAdmissionGeneration;
+    authAdmissionAbort?.abort(new DOMException('Authentication superseded', 'AbortError'));
+    authAdmissionAbort = null;
+    if (token && deps.waitForContentAdmission) {
+      const admission = new AbortController();
+      authAdmissionAbort = admission;
+      try {
+        await waitForContentAdmission(admission.signal);
+      } finally {
+        if (authAdmissionAbort === admission) authAdmissionAbort = null;
+      }
+    }
+    if (generation !== authAdmissionGeneration) return;
     if (disposePromise) {
       return;
+    }
+    if (token && deps.waitForContentAdmission && electronLocalDataPlane && !transportAttached) {
+      await ensureLocalTransport();
+      if (generation !== authAdmissionGeneration || disposePromise) return;
     }
     const nextAuthToken = token && token !== '' ? token : null;
     const previousAuthToken = authToken;
@@ -4606,6 +4653,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           workspaceId,
           machineId,
           resolvePlane: async (targetMachineId) => {
+            await waitForContentAdmission();
             const plane = await targetRouter.resolvePlaneForMachine(targetMachineId, {
               timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
             });
@@ -5333,6 +5381,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
     // Publish retirement before any cancellation callback or asynchronous close runs.
     disposePromise = Promise.resolve().then(async () => {
+      egressAbort.abort(new Error('Runtime disposed'));
       await encryptedDispatch?.close();
       sessionReaderAbort.abort();
       windowBootstrap?.close();
@@ -5453,6 +5502,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         ...pendingWebAttaches,
         metaRoomJoinPromise,
         localTransportAttachPromise,
+        localStartupPromise,
+        initialTokenAttachPromise,
       ]);
       await reconnectsClosed;
       // No reconnect sweep can add work after its loop has closed. Timed-out
@@ -5578,7 +5629,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       requestSessionDispatchTurn,
       requestSessionSteer,
       contentMode: protectedContent ? 'e2ee' : 'plaintext',
-    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
+      attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
       ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
       isMachineRpcUnreachable,
     },
@@ -5608,7 +5659,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           requestSessionDispatchTurn,
           requestSessionSteer,
           contentMode: protectedContent ? 'e2ee' : 'plaintext',
-    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
+          attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
         },
       }).catch((error: unknown) => {
         console.warn('Legacy pending messages could not be migrated', error);
@@ -5624,11 +5675,25 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   try {
     deps.signal?.throwIfAborted();
     if (electronLocalDataPlane) {
-      localTransportAttachPromise = attachLocalLoroDataPlaneTransport();
-      await localTransportAttachPromise;
-      await ensureMetaRoomSynced();
+      localStartupPromise = ensureLocalTransport();
+      if (deps.waitForContentAdmission) {
+        // IndexedDB is usable before classification. This task remains owned by
+        // dispose, which cancels admission before joining a late attach.
+        void localStartupPromise.catch(() => {
+          if (!disposePromise) deps.onControlConnectionStateChange?.('error');
+        });
+      } else {
+        await localStartupPromise;
+      }
     } else if (deps.token != null && deps.token !== '') {
-      await setAuthToken(deps.token);
+      if (deps.waitForContentAdmission) {
+        initialTokenAttachPromise = setAuthToken(deps.token);
+        void initialTokenAttachPromise.catch(() => {
+          if (!disposePromise) deps.onControlConnectionStateChange?.('error');
+        });
+      } else {
+        await setAuthToken(deps.token);
+      }
     }
     deps.signal?.throwIfAborted();
   } catch (error) {
@@ -5648,6 +5713,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
+    waitForContentAdmission,
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
