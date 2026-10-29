@@ -166,3 +166,16 @@ missing browser WebCrypto fails instead of importing Node. Algorithms are unchan
 in Chromium/WebKit with native curves and WASM disabled. Its separate CI job
 installs both engines; normal unit tests need no browser. This is desktop engine
 compatibility evidence, not minimum-OS real-device or custody acceptance.
+
+## IndexedDB ownership
+
+The opt-in IDB adapter owns one scoped connection and short native transactions,
+not a second verification cache. The account/workspace/genesis database survives
+identity replacement; local pairing slots add the device/installation binding.
+Retained origins are opaque until the existing ledger workflow qualifies them.
+Strict durability is requested, while completion is the observable commit boundary.
+Close fences new calls before draining the actual transaction promises, and late
+open callbacks cannot revive a closed owner. No transaction waits on crypto or
+network. The [service guide](services.md#browser-ledger-and-original-stores)
+explains routing, CAS and original retention; the owning architecture note records
+the rejected per-device database reset.

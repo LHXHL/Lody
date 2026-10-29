@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-`@lody/e2ee-core` 原先暴露约二十个工厂函数：每个都自己打开 SQLite 文件、以裸回调接入远端系统，并各自维护一份回滚钉。这让库难以在 Lody 之外复用、难以阅读，也无法换用别的后端或存储。现在核心拆为端口（由应用提供的 Effect service）、流程（库在端口之上以 Layer 实现的 service）和适配器（SQLite 与 Loro Streams 实现），通过六个按使用者角色划分的入口加一个不稳定的 `./internal` 暴露。协议字节、存储保证和流程行为保持不变，原有行为测试全部改为针对真实 Layer 运行；主要剩余限制是目前只有 Node SQLite 与 Loro Streams 两类适配器。
+`@lody/e2ee-core` 原先暴露约二十个工厂函数：每个都自己打开 SQLite 文件、以裸回调接入远端系统，并各自维护一份回滚钉。这让库难以在 Lody 之外复用、难以阅读，也无法换用别的后端或存储。现在核心拆为端口（由应用提供的 Effect service）、流程（库在端口之上以 Layer 实现的 service）和适配器，通过按角色划分的入口加不稳定的 `./internal` 暴露。Node SQLite、浏览器账本/原件 IndexedDB、JS 曲线和 Loro Streams 适配器分别提供能力；存储不授予权限。协议字节和流程保证仍归既有 core，浏览器持久密钥保护与产品组合独立于这些存储和密码适配器。
 
 ## 问题
 
@@ -21,7 +21,7 @@ Translation: current
 1. **端口**（`./services`）：后端（`LedgerLog`、`LedgerFeedSource`、`KeyMailbox`、`EpochStagingStore`）、平台（`DeviceIdentity`、`KeyProtector`、`CandidateProtector`）、应用（`WorkspaceScope`、`LedgerViewSource`、`EpochPublicationSource`）和本地存储（每个日志或存储一个端口）。端口带有类型化错误（`BackendError`、`LocalStoreError` 等）与 JSDoc 合同。
 2. **流程**（`.`）：`VerifiedLedger`、`LedgerFeed`、`LedgerSubmission`、`InstalledEpochKeys`、`InstalledEpochHistory`、`KeyReceiver`、`KeyRepair`、`KeyDistributor`、`EpochPublisher`，均为带 `layer` 的 `Context.Service`，只依赖端口和协议代码；`E2eeWorkflows` 负责组合。
 3. **唯一的回滚守卫。** `VerifiedLedger` 加一个 `LedgerPinStore` 取代各存储自带的钉；钉故障测试集中到一个归属测试套件。
-4. **适配器**（`./adapters/node-sqlite`、`./adapters/loro-streams`）。每次存储写入都在同一事务内读回校验自身写入以及文件的工作区/设备绑定，被篡改或被忽略的写入会回滚，与旧存储一致。
+4. **适配器**通过独立入口实现端口，每次存储写入都在同一事务内读回校验自身写入与捕获的绑定，被忽略或不一致的写入会中止事务。SQLite 仍是全部本地端口的参考实现；IndexedDB 仅提供账本/pin/提交及配对原件。
 5. **后端合同**（`./host`）：以 Effect Schema 定义的暂存 DTO、请求签名字节和暂存请求校验，以及邮箱规则函数。平台无关；`@lody/cloud-api` 改为重新导出暂存合同，不再自行定义。
 6. **Effect 实践。** 公开方法使用 `Effect.fn` 产生 span；内部辅助使用 `Effect.fnUntraced`；只包 `Effect.gen` 的函数改为 `Effect.fnUntraced`；各流程声明完整的失败联合类型。
 
@@ -50,10 +50,26 @@ Translation: current
 - 平台回调 `documentState` 与 `recoveryConfiguration` 会收到工作区已构建的服务，因为平台在组装原生状态或恢复输入时可能需要流程（读取密钥、投递）。
 - Lab 对服务错误按 `reason`、对协议错误按 `code` 投影；暂存适配器保留后端拒绝的原因。
 
+## 浏览器存储边界
+
+拒绝按设备创建数据库：替换丢失的身份也会丢失该工作区的回滚知识和未决原件。
+IndexedDB 保留一个稳定的账号/工作区/genesis 数据库；配对行额外绑定本地设备、
+安装、session 和用途，替换仍保留旧交换。pin revision token 只是本地 CAS 前置条件，
+不是权限或模式缓存。
+
+适配器使用短原生回调事务，不在 IDB 中等待 crypto/network。strict durability
+是浏览器提示；读回与绑定核对后，以 complete 作为可观察成功边界。
+关闭拒绝新工作并等待真实事务 Promise；未知结果从保留的首份字节核对。
+不通过备用数据库或隐式 reset 恢复可用性。宿主须独立限定 retained 账本状态、
+验证审批，在入库前保护配对中的秘密，并按[custody 合同](../../../../specs/e2ee/client-custody.zh.md)
+处理持久保护丢失。Receive/epoch/mailbox/outbox/repair/snapshot journal 仍为独立能力。
+
 ## 验证
 
-核心：20 个测试文件（共 356 个测试，含组合测试与公开文档测试），使用真实 SQLite、Ed25519、HPKE 与子进程。`test/composition.test.ts` 通过 `E2eeWorkflows` 在两台设备之间完成一次密钥分发。`test/public-docs.test.ts` 要求每个公开导出、命名空间导出与 service 成员都有 JSDoc，并要求 `docs/surface*.md` 与实际导出一致。收尾测试还覆盖类型化源失败不推进检查点，以及查询/确认 span 正常结束。本次收尾通过核心类型检查、类型感知 lint（有既存警告）、Effect lint（有建议性警告）和根目录 format；隔离工作区缺少其他包依赖与 ACP 子模块，全仓 `check`、公开边界检查和文档检查未能全部通过，没有报出 E2EE 文档错误。
-
-完整五层栈还通过了核心与 Lab 类型检查、全部 401 个核心测试和 201 个 Lab 测试。工作区将刷新失败转换为 `LedgerViewSourceError`，Lab 迁移后的组件辅助代码保持同一端口合同。工作区/恢复 service 成员也受更严格的文档检查约束。这些本地合成测试结果不代表生产验收。
-
-限制：Lab 与桌面端消费者在栈中后续 PR 里迁移；尚无 IndexedDB 或移动端存储适配器；生产组合仍未接入。包仍为 `private`、版本 `0.0.0`；服务边界可复用不代表独立 SDK 或后端已经发布。
+`packages/e2ee-core/test/composition.test.ts` 用真实流程 Layer 与密码实现验证设备收钥，
+`packages/e2ee-core/test/public-docs.test.ts` 检查 JSDoc 与入口清单。
+`packages/e2ee-core/test/indexeddb.browser.test.ts` 使用真实 Chromium/WebKit 持久
+profile，覆盖进程重开、双 tab 竞争、原生 abort/配额/写入不一致和关闭，
+验证精确原件保留、记录/游标原子回滚及限定 retained 状态的重开。
+这些合成浏览器引擎检查不代表最低 OS、真机或生产验收。包仍为 private、
+版本 0.0.0；可复用边界不代表已发布独立 SDK 或已启用产品 host。

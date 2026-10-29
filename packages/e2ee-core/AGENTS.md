@@ -10,7 +10,7 @@ whitepaper, Specs, decisions and this package's docs. Contract:
 ## Structure
 
 - Entries are exactly `.` (workflows), `./services` (ports), `./protocol`,
-  `./host`, `./adapters/node-custody`, `./adapters/browser-crypto`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
+  `./host`, `./adapters/node-custody`, `./adapters/browser-crypto`, `./adapters/indexeddb`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
   (bundle-time WebAssembly for workerd) and the unstable `./internal`. Add an export only to the entry whose role it serves.
 - Protocol code is pure (Result, plus Effect only for async crypto/verification)
   and imports no service or adapter. Workflows depend only on protocol code and
@@ -102,6 +102,11 @@ whitepaper, Specs, decisions and this package's docs. Contract:
 - Local store mutations are atomic, verify their own write and binding in the
   same transaction, and never become authority. No transaction spans crypto or
   network I/O.
+- IndexedDB routing stays stable across device replacement: one account/workspace/genesis
+  database retains pins and originals. Pairing rows additionally bind the local device,
+  installation, session and purpose. No receipt or stored state grants approval.
+  Mutations resolve only on transaction completion; close fences new calls and drains
+  admitted native transactions. Missing/corrupt existing storage never resets a pin.
 - Tests use fixed synthetic vectors, real SQLite and crypto, explicit signals;
   never captured transcripts, real keychains or private designs.
 - TypeScript Worker fixtures preload `test/worker-loader.mjs` to register tsx
