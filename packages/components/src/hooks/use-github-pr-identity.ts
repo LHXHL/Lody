@@ -1,8 +1,10 @@
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueriesEnabled } from './use-workspace-feature';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCloudMutation } from '@lody/platform/react';
 import { withGitHubTokenRetry, withGitHubOperationTokenRetry } from '@/lib/github-token';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
@@ -46,7 +48,9 @@ export function useGitHubPrIdentity({
         }
       : 'skip'
   );
-  const resolveLegacy = useCloudMutation(cloudOperations.github.resolveLegacyPrRepositoryIdentity);
+  const resolveLegacy = useLegacyWorkspaceMutation(
+    cloudOperations.github.resolveLegacyPrRepositoryIdentity
+  );
   const linkedRepositoryId = serverVersions?.repositoryId;
   const ready =
     hasInputs &&

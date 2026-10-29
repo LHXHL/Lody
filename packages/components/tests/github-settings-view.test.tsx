@@ -62,6 +62,7 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 vi.mock('../src/hooks/use-workspace-feature', async (original) => ({
   ...(await original<object>()),
   useLegacyWorkspaceQueriesEnabled: () => true,
+  useAssertLegacyWorkspaceAccess: () => () => {},
   useLegacyWorkspaceQueryStatus: () => 'allowed',
 }));
 vi.mock('../src/hooks/use-personal-github-authorization', () => ({

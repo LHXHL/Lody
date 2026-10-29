@@ -1,3 +1,5 @@
+import { usePersonalGitHubAuthorization } from '../src/hooks/use-personal-github-authorization';
+import { storePersonalGitHubProof } from '../src/components/settings/github-personal-authorization';
 // @vitest-environment jsdom
 import { ErrorBoundary } from '../src/components/error-boundary';
 import { act, createRef } from 'react';
@@ -16,9 +18,16 @@ import {
   type SessionChatInputAreaHandle,
 } from '../src/components/sessions/session-chat-input-area';
 import { userAtom } from '../src/atoms';
+import {
+  PromptShortcutProvider,
+  usePromptShortcuts,
+} from '../src/providers/prompt-shortcut-provider';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { WorkspaceRouteTargetProvider } from '../src/providers/workspace-route-target';
-import { useLegacyWorkspaceQuery } from '../src/hooks/use-legacy-workspace-query';
+import {
+  useLegacyWorkspaceQuery,
+  useLegacyWorkspaceMutation,
+} from '../src/hooks/use-legacy-workspace-query';
 import { cloudOperations } from '../src/lib/cloud-api-operations';
 import { runtimeAtom } from '../src/atoms/runtime';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
@@ -99,7 +108,16 @@ it.each(['unpaired', 'paired'] as const)(
     };
     const platform: PlatformProvider = {
       ...TEST_CLOUD_PLATFORM,
-      cloudApi: { ...TEST_CLOUD_PLATFORM.cloudApi!, useQuery: query },
+      cloudApi: {
+        ...TEST_CLOUD_PLATFORM.cloudApi!,
+        useMutation: () => async () => {
+          throw new Error('unexpected cloud mutation');
+        },
+        useAction: () => async () => {
+          throw new Error('unexpected cloud action');
+        },
+        useQuery: query,
+      },
       identity: {
         ...TEST_CLOUD_PLATFORM.identity,
         session: createStaticStore({ status: 'authenticated', user: { id: TOUR_USER_ID } }),
@@ -477,4 +495,182 @@ it('drops legacy access across account changes and resumes only with that accoun
   );
   expect(container.textContent).toBe('settled');
   expect(subscribed).toBe(true);
+});
+
+function ShortcutState() {
+  const shortcuts = usePromptShortcuts();
+  return (
+    <output>
+      {JSON.stringify({
+        loading: shortcuts.loading,
+        entries: shortcuts.entries,
+        runtime: shortcuts.runtime !== null,
+      })}
+    </output>
+  );
+}
+
+it.each(['unknown', 'provisional', 'encrypted'] as const)(
+  'keeps %s shortcut discovery inside legacy admission',
+  async (state) => {
+    const store = createTourStore(DEFAULT_TOUR_IDENTITY);
+    const mode = store.get(workspaceContentModeAtom)!;
+    store.set(
+      workspaceContentModeAtom,
+      state === 'unknown'
+        ? null
+        : state === 'provisional'
+          ? { ...mode, descriptor: null }
+          : {
+              ...mode,
+              descriptor: {
+                workspaceId: TOUR_WORKSPACE_ID,
+                contentMode: 'e2ee',
+                contentModeVersion: 1,
+                activation: 'control-only',
+                genesisHash: 'ab'.repeat(32),
+                cryptoOrgId: 'ab'.repeat(32),
+              },
+            }
+    );
+    const platform: PlatformProvider = {
+      ...TEST_CLOUD_PLATFORM,
+      identity: {
+        ...TEST_CLOUD_PLATFORM.identity,
+        session: createStaticStore({ status: 'authenticated', user: { id: TOUR_USER_ID } }),
+      },
+      cloudApi: {
+        ...TEST_CLOUD_PLATFORM.cloudApi!,
+        useMutation: () => async () => {
+          throw new Error('unexpected cloud mutation');
+        },
+        useAction: () => async () => {
+          throw new Error('unexpected cloud action');
+        },
+        useQuery: ((_operation, args) => {
+          if (args !== 'skip') throw new Error('e2ee_control_only');
+          return undefined;
+        }) as CloudApi['useQuery'],
+      },
+    };
+    await act(async () =>
+      root.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={store}>
+            <ErrorBoundary
+              fallbackRender={({ error }) => <output role="alert">{String(error)}</output>}
+            >
+              <PromptShortcutProvider enabled>
+                <ShortcutState />
+                <p>chat stays mounted</p>
+              </PromptShortcutProvider>
+            </ErrorBoundary>
+          </Provider>
+        </PlatformContext.Provider>
+      )
+    );
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('chat stays mounted');
+    expect(JSON.parse(container.querySelector('output')!.textContent!)).toEqual({
+      loading: state !== 'encrypted',
+      entries: [],
+      runtime: false,
+    });
+  }
+);
+
+it('rechecks live admission before retained mutation callbacks can send', async () => {
+  const store = createTourStore(DEFAULT_TOUR_IDENTITY);
+  const mode = store.get(workspaceContentModeAtom)!;
+  const sent: string[] = [];
+  const platform: PlatformProvider = {
+    ...TEST_CLOUD_PLATFORM,
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useMutation: (operation) =>
+        (async () => {
+          sent.push(operation.name);
+          return { updated: true };
+        }) as never,
+    },
+  };
+  let markRead!: (args: { itemId: string }) => Promise<unknown>;
+  function Actions() {
+    markRead = useLegacyWorkspaceMutation(cloudOperations.inbox.markRead);
+    return <p>actions</p>;
+  }
+  await act(async () =>
+    root.render(
+      <PlatformContext.Provider value={platform}>
+        <Provider store={store}>
+          <Actions />
+        </Provider>
+      </PlatformContext.Provider>
+    )
+  );
+  await expect(markRead({ itemId: 'synthetic-item' })).resolves.toEqual({ updated: true });
+  const retained = markRead;
+  await act(async () => {
+    store.set(workspaceContentModeAtom, { ...mode, descriptor: null });
+    // Deliberately invoke before React commits a replacement callback.
+    await expect(retained({ itemId: 'synthetic-item' })).rejects.toMatchObject({
+      code: 'legacy_workspace_admission_pending',
+    });
+  });
+  await act(async () => {
+    store.set(workspaceContentModeAtom, mode);
+    store.set(userAtom, { ...store.get(userAtom)!, id: 'new-account' });
+    store.set(workspaceContentModeAtom, { ...mode, accountId: 'new-account' });
+  });
+  await expect(retained({ itemId: 'synthetic-item' })).rejects.toMatchObject({
+    code: 'legacy_workspace_admission_account_changed',
+  });
+  expect(sent).toEqual(['inbox:markRead']);
+});
+
+it('preserves an OAuth return until ordinary mode admission is available', async () => {
+  const store = createTourStore(DEFAULT_TOUR_IDENTITY);
+  const mode = store.get(workspaceContentModeAtom)!;
+  store.set(workspaceContentModeAtom, { ...mode, descriptor: null });
+  const sent: string[] = [];
+  const platform: PlatformProvider = {
+    ...TEST_CLOUD_PLATFORM,
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useAction: (operation) =>
+        (async () => {
+          sent.push(operation.name);
+          return { success: true };
+        }) as never,
+    },
+  };
+  function Return() {
+    usePersonalGitHubAuthorization(TOUR_WORKSPACE_ID, TOUR_WORKSPACE_SLUG);
+    return <p>authorization</p>;
+  }
+  storePersonalGitHubProof('synthetic-state', 'synthetic-verifier');
+  window.location.hash =
+    '#github-personal=' +
+    encodeURIComponent(JSON.stringify({ state: 'synthetic-state', code: 'synthetic-code' }));
+  try {
+    await act(async () =>
+      root.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={store}>
+            <Return />
+          </Provider>
+        </PlatformContext.Provider>
+      )
+    );
+    expect(window.location.hash).toContain('github-personal=');
+    expect(sessionStorage.getItem('lody:githubPersonalAuthorization')).not.toBeNull();
+    expect(sent).toEqual([]);
+    await act(async () => store.set(workspaceContentModeAtom, mode));
+    expect(sent).toEqual(['githubPersonalAuthorization:complete']);
+    expect(window.location.hash).toBe('');
+    expect(sessionStorage.getItem('lody:githubPersonalAuthorization')).toBeNull();
+  } finally {
+    window.location.hash = '';
+    sessionStorage.removeItem('lody:githubPersonalAuthorization');
+  }
 });

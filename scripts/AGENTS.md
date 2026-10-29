@@ -13,6 +13,10 @@ maintenance commands here.
   A new violation should normally be fixed at its dependency boundary, not
   appended to the allowlist.
 - `check-code-collab-imports.mjs` protects Code Collab ownership boundaries.
+- `check-legacy-cloud-access.mjs` requires the shared admission wrappers for legacy
+  cloud query/mutation/action references. New endpoints in its protected protocol
+  families inherit the rule. Keep non-React/control exceptions exact and reasoned;
+  `--inventory` prints every current client entry and protection.
 - `check-public-boundary.mjs` rejects closed product paths, private workspace
   dependencies/imports, unresolved `workspace:` dependencies, closed-path
   documentation, internal absolute paths in any publishable text, and captured

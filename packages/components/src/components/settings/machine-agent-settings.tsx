@@ -1,11 +1,13 @@
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   type AcpSessionMonitorSnapshot,
@@ -777,7 +779,7 @@ export function MachineAgentSettings({
       ? { workspaceId, machineId: resolvedSelectedMachine.id }
       : 'skip'
   );
-  const revokeMachineCredentialsMutation = useCloudMutation(
+  const revokeMachineCredentialsMutation = useLegacyWorkspaceMutation(
     cloudOperations.machineCredentials.revokeMachineCredentials
   );
 

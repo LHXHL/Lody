@@ -78,7 +78,10 @@ Legacy cloud machine, project, inbox, GitHub and usage catalogs require the
 runtime admission atom's explicit ordinary or legacy descriptor bound to the current
 account, workspace ID and route slug. Unknown mode stays pending; local runtime
 opening, reading and input remain available. Encrypted workspaces never query
-these catalogs, even after pairing. Preserve ordinary errors and owner-only local
+these catalogs, even after pairing. Use the shared legacy query/mutation/action
+wrappers; imperative operations recheck live admission before sending and retained
+callbacks cannot cross accounts. The repository legacy-cloud check rejects direct
+references; its inventory owns the exact control/CLI exceptions. Preserve ordinary errors and owner-only local
 visibility; skipping a catalog grants no machine or execution authority.
 
 ## Workspace catalog

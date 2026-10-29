@@ -33,7 +33,21 @@ an explicit ordinary or legacy descriptor from `workspaceContentModeAtom`, bound
 to the current account, workspace ID and routed slug. Unknown mode, including
 `descriptor: null` on a provisional runtime, keeps those catalogs pending. No
 query starts another describe or mode cache; runtime admission publishes the one
-verdict, including after recovery. Local runtime opening, reading and composer
+verdict, including after recovery. `useLegacyWorkspaceQuery`,
+`useLegacyWorkspaceMutation` and `useLegacyWorkspaceAction` own these reads and
+writes. Imperative writes recheck the live atoms at invocation and bind retained
+callbacks to their original account and workspace; the GitHub token adapter also
+checks after responses and before an auth retry. `pnpm check:legacy-cloud-access`
+rejects direct legacy API references, including newly added operations in the
+protected protocol families. Its `--inventory` output lists every client entry
+and the exact non-React/control exceptions with their safety basis.
+
+Prompt Shortcuts waits before opening a cloud store/sync lifetime; its local store
+needs no cloud admission. Retiring the mode immediately hides the old instance,
+and its existing identity checks stop late initialization and pending sync calls.
+The restored onboarding Projects step consumes the same verdict: unknown remote
+catalogs load, encrypted mode offers a router link to control/pairing, and local
+projects and Back remain available. Local runtime opening, reading and composer
 input remain available while verification runs. Encrypted workspaces keep these
 queries off, including paired desktops. Visibility retains only the
 existing local owner projection; absent legacy access rows never grant another

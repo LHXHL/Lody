@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
@@ -23,7 +24,6 @@ import {
   type VisibleMachineIndex,
 } from '@/lib/visible-machine-index';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 export type { MachineVisibilityAccess };
@@ -65,7 +65,7 @@ export function useVisibleMachineMetas(
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   const currentUserId = useWorkspaceLocalAccountId();
-  const queriedAccessRows = useCloudQuery(
+  const queriedAccessRows = useLegacyWorkspaceQuery(
     cloudOperations.machines.listVisibleMachines,
     enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );

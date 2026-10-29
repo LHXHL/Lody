@@ -1,3 +1,7 @@
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
@@ -698,7 +702,7 @@ function WorkspaceChatLanding({
   const { workspaceId } = useResolvedWorkspaceScope();
   const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
-  const setLocalProjectSharedWithTeam = useCloudMutation(
+  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
@@ -736,11 +740,11 @@ function WorkspaceChatLanding({
       activeWorkspaceId: activeOrganization?.id ?? null,
       memberCount: activeOrganization?.members.length ?? null,
     });
-  const inboxRows = useCloudQuery(
+  const inboxRows = useLegacyWorkspaceQuery(
     cloudOperations.inbox.listMine,
     showProjectSharing && workspaceId ? { workspaceId } : 'skip'
   );
-  const sharingReviewServerState = useCloudQuery(
+  const sharingReviewServerState = useLegacyWorkspaceQuery(
     cloudOperations.inbox.getSharingReviewState,
     legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
@@ -754,10 +758,14 @@ function WorkspaceChatLanding({
   if (sharingReviewInboxReady) {
     sharingReviewInboxRevisionRef.current = sharingReviewServerState?.sourceRevision ?? null;
   }
-  const reconcileSharingReview = useCloudMutation(cloudOperations.inbox.reconcileSharingReview);
-  const markInboxItemRead = useCloudMutation(cloudOperations.inbox.markRead);
-  const dismissInboxItem = useCloudMutation(cloudOperations.inbox.dismiss);
-  const suppressSharingReview = useCloudMutation(cloudOperations.inbox.suppressSharingReview);
+  const reconcileSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.reconcileSharingReview
+  );
+  const markInboxItemRead = useLegacyWorkspaceMutation(cloudOperations.inbox.markRead);
+  const dismissInboxItem = useLegacyWorkspaceMutation(cloudOperations.inbox.dismiss);
+  const suppressSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.suppressSharingReview
+  );
   const handleShareLocalProjectWithTeam = useCallback(
     async (selection: LocalProjectSelection) => {
       if (!workspaceId) throw new Error('Workspace is not ready');
@@ -821,7 +829,7 @@ function WorkspaceChatLanding({
     (machineId: string) => onlineMachineIds.has(machineId as MachineId),
     [onlineMachineIds]
   );
-  const freshRepositories = useCloudQuery(
+  const freshRepositories = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
@@ -829,7 +837,7 @@ function WorkspaceChatLanding({
     cloudOperations.billing.getWorkspaceBillingEntitlement,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const workspaceReposWithStatus = useCloudQuery(
+  const workspaceReposWithStatus = useLegacyWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
     legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   ) as
@@ -982,7 +990,7 @@ function WorkspaceChatLanding({
         reconcileWriterId: writerId,
         reconcileAttempt: attempt,
       });
-    })();
+    })().catch((error) => console.error('Failed to reconcile sharing review', error));
     return cancel;
   }, [
     activeOrganization?.id,
@@ -5438,7 +5446,9 @@ function WorkspaceChatLanding({
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
       if (!item) return;
-      void markInboxItemRead({ itemId: item._id });
+      void markInboxItemRead({ itemId: item._id }).catch((error) =>
+        console.error('Failed to mark inbox item read', error)
+      );
       if (item.kind === 'sharing_review') {
         if (sharingReviewState.actionTarget === 'machines') {
           openSettings('machines');
@@ -5466,7 +5476,10 @@ function WorkspaceChatLanding({
   const handleMobileInboxItemDismiss = useCallback(
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
-      if (item) void dismissInboxItem({ itemId: item._id });
+      if (item)
+        void dismissInboxItem({ itemId: item._id }).catch((error) =>
+          console.error('Failed to dismiss inbox item', error)
+        );
     },
     [dismissInboxItem, inboxRows]
   );
@@ -6201,7 +6214,9 @@ function WorkspaceChatLanding({
               type="button"
               className="text-xs font-semibold text-primary hover:underline"
               onClick={() => {
-                void markInboxItemRead({ itemId: sharingReviewRow._id });
+                void markInboxItemRead({ itemId: sharingReviewRow._id }).catch((error) =>
+                  console.error('Failed to mark sharing review read', error)
+                );
                 openSettings(sharingReviewState.actionTarget ?? 'projects');
               }}
             >
@@ -6213,7 +6228,11 @@ function WorkspaceChatLanding({
           <button
             type="button"
             className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-            onClick={() => void suppressSharingReview({ itemId: sharingReviewRow._id })}
+            onClick={() =>
+              void suppressSharingReview({ itemId: sharingReviewRow._id }).catch((error) =>
+                console.error('Failed to suppress sharing review', error)
+              )
+            }
           >
             {t('inbox.sharingReview.neverRemind', "Don't remind me again")}
           </button>
@@ -6222,7 +6241,11 @@ function WorkspaceChatLanding({
       <button
         type="button"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
-        onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
+        onClick={() =>
+          void dismissInboxItem({ itemId: sharingReviewRow._id }).catch((error) =>
+            console.error('Failed to dismiss sharing review', error)
+          )
+        }
         aria-label={t('common.dismiss', 'Dismiss')}
       >
         <X className="h-4 w-4" aria-hidden="true" />

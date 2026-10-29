@@ -90,7 +90,7 @@ vi.mock('@/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
   useRecoverableConvexQuery: () => undefined,
 }));
-vi.mock('@/providers/cloud-github-token-port', () => ({ cloudGitHubTokenPort: {} }));
+vi.mock('@/providers/cloud-github-token-port', () => ({ createCloudGitHubTokenPort: () => ({}) }));
 vi.mock('@/lib/github-token-port', () => ({ installGitHubTokenPort: () => () => {} }));
 vi.mock('@/lib/cloud-http-port', () => ({ installCloudHttpPort: () => () => {} }));
 

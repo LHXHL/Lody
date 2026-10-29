@@ -1,3 +1,5 @@
+import { userAtom } from '../src/atoms';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
   createSessionSendResources,
   type SessionSendResources,
@@ -559,6 +561,17 @@ describe('useSessionActions', () => {
     jotaiStore.set(sessionMetaCacheAtom, options.sessionMetaCache ?? {});
     jotaiStore.set(currentWorkspaceIdAtom, options.workspaceId ?? ('workspace-1' as WorkspaceId));
     jotaiStore.set(currentWorkspaceSlugAtom, options.workspaceSlug ?? 'workspace-slug');
+    jotaiStore.set(userAtom, { id: 'synthetic-session-account' } as never);
+    jotaiStore.set(workspaceContentModeAtom, {
+      accountId: 'synthetic-session-account',
+      workspaceId: options.workspaceId ?? 'workspace-1',
+      workspaceSlug: options.workspaceSlug ?? 'workspace-slug',
+      descriptor: {
+        workspaceId: options.workspaceId ?? 'workspace-1',
+        contentMode: 'plaintext',
+        contentModeVersion: 1,
+      },
+    });
 
     let actions: SessionActions | null = null;
     container = document.createElement('div');

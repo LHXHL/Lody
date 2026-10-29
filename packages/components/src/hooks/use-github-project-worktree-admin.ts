@@ -1,7 +1,9 @@
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useMemo, useState } from 'react';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorktreeCleanupScriptConfig, WorktreeSetupScriptConfig } from '@lody/shared';
 import {
@@ -46,8 +48,12 @@ export type GithubProjectWorktreeAdmin = {
 
 export function useGithubProjectWorktreeSaves() {
   const { workspaceId } = useResolvedWorkspaceScope();
-  const setRepoWorktreeSetup = useCloudMutation(cloudOperations.github.setRepoWorktreeSetup);
-  const setRepoWorktreeCleanup = useCloudMutation(cloudOperations.github.setRepoWorktreeCleanup);
+  const setRepoWorktreeSetup = useLegacyWorkspaceMutation(
+    cloudOperations.github.setRepoWorktreeSetup
+  );
+  const setRepoWorktreeCleanup = useLegacyWorkspaceMutation(
+    cloudOperations.github.setRepoWorktreeCleanup
+  );
   const getConvexErrorMessage = useConvexErrorMessage();
 
   const [setupSavingByKey, setSetupSavingByKey] = useState<Record<string, boolean>>({});

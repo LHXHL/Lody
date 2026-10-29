@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -15,7 +16,6 @@ import {
 import { useVisibleMachineMetas } from './use-visible-machine-metas';
 import type { VisibleMachineIndex } from '@/lib/visible-machine-index';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 export type { LocalProjectVisibilityAccess };
@@ -62,7 +62,7 @@ export function useVisibleLocalProjectsFromMachineIndex(
     accessByMachineId,
     isLoading: machineVisibilityLoading,
   } = visibleMachineIndex;
-  const queriedAccessRows = useCloudQuery(
+  const queriedAccessRows = useLegacyWorkspaceQuery(
     cloudOperations.localProjects.listVisibleLocalProjects,
     enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
