@@ -58,6 +58,12 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
     claimAutomaticCommand: () => false,
   }),
 }));
+// This suite exercises the ordinary GitHub presentation/authorization flow.
+vi.mock('../src/hooks/use-workspace-feature', async (original) => ({
+  ...(await original<object>()),
+  useLegacyWorkspaceQueriesEnabled: () => true,
+  useLegacyWorkspaceQueryStatus: () => 'allowed',
+}));
 vi.mock('../src/hooks/use-personal-github-authorization', () => ({
   usePersonalGitHubAuthorization: () => async () => {
     authState.linkedCallback = 'operation-only';

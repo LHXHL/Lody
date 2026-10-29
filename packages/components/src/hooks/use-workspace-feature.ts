@@ -1,6 +1,9 @@
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
+import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
+import { userAtom } from '@/atoms';
 import type { MachineId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { usePlatformWorkspaces } from '@lody/platform/react';
+import { usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useTranslation } from 'react-i18next';
 import { workspaceFeatureUnavailableMessage } from '@/lib/workspace-feature';
@@ -36,15 +39,25 @@ export function useMachineRpcFeatureReason(
   return machineId && machineId === localMachineId ? undefined : reason;
 }
 
-/** Legacy plaintext catalogs are refused even after an encrypted device joins.
- * This is a display/query choice; it never grants access to a machine or transport.
+export type LegacyWorkspaceQueryStatus = 'pending' | 'allowed' | 'blocked';
+
+/** Consume RuntimeProvider's account/workspace-bound describe verdict. A local
+ * runtime or a workspace listing cannot prove that remote plaintext APIs apply.
  */
-export function useLegacyWorkspaceQueriesEnabled(workspaceId: string | null | undefined): boolean {
+export function useLegacyWorkspaceQueryStatus(
+  workspaceId: string | null | undefined
+): LegacyWorkspaceQueryStatus {
+  const platform = usePlatform();
   const mode = useAtomValue(workspaceContentModeAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const accountId = useAtomValue(userAtom)?.id ?? null;
+  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const currentWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const routeSlug = useWorkspaceRouteTargetSlug() ?? currentWorkspaceSlug;
   const workspacesState = usePlatformWorkspaces();
-  if (!workspaceId) return false;
-  return !(
+  if (platform.kind === 'local') return 'allowed';
+  if (!workspaceId) return 'pending';
+  if (
     (mode?.workspaceId === workspaceId &&
       mode.descriptor &&
       'contentMode' in mode.descriptor &&
@@ -54,5 +67,28 @@ export function useLegacyWorkspaceQueriesEnabled(workspaceId: string | null | un
       workspacesState.workspaces.some(
         (workspace) => workspace.id === workspaceId && workspace.contentMode === 'e2ee'
       ))
-  );
+  )
+    return 'blocked';
+  if (
+    !accountId ||
+    !routeSlug ||
+    currentWorkspaceId !== workspaceId ||
+    mode?.accountId !== accountId ||
+    mode.workspaceSlug !== routeSlug ||
+    mode.workspaceId !== workspaceId ||
+    mode.descriptor?.workspaceId !== workspaceId
+  )
+    return 'pending';
+  const descriptor = mode.descriptor;
+  return ('contentMode' in descriptor &&
+    descriptor.contentMode === 'plaintext' &&
+    descriptor.contentModeVersion === 1) ||
+    ('admission' in descriptor && descriptor.admission === 'legacy-unclassified')
+    ? 'allowed'
+    : 'pending';
+}
+
+/** This UI/query decision never grants access to a machine or transport. */
+export function useLegacyWorkspaceQueriesEnabled(workspaceId: string | null | undefined): boolean {
+  return useLegacyWorkspaceQueryStatus(workspaceId) === 'allowed';
 }

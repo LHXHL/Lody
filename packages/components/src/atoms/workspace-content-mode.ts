@@ -5,7 +5,8 @@ import type { WorkspaceAdmissionDescriptor } from '@lody/cloud-api';
  * `descriptor: null` is a provisional ordinary admission: no local or listed
  * encryption evidence exists, the pre-E2EE offline-first runtime may open, and
  * the authoritative mode is verified in the background. An encrypted answer
- * retires that runtime before the verdict changes.
+ * retires that runtime before the verdict changes. Provisional admission does
+ * not permit legacy remote catalogs; those await a bound ordinary descriptor.
  */
 export type WorkspaceContentMode =
   | {

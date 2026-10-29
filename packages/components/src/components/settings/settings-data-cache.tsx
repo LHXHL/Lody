@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQueriesEnabled } from '@/hooks/use-workspace-feature';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -116,6 +116,7 @@ export type SettingsWorkspaceRepoWithStatus = {
 };
 
 type SettingsDataCacheContextValue = {
+  workspaceModePending: boolean;
   workspaceId: string | null;
   canManageGithub: boolean;
   usageTimelineByRange: Partial<Record<SettingsUsageRange, SettingsUsageTimelineData | undefined>>;
@@ -134,7 +135,8 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   const { isAuthenticated: isConvexAuthenticated, isLoading: isConvexAuthLoading } =
     useAuthenticatedConvex();
   // Removal clears the atom before Better Auth drops its stale active organization.
-  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(currentWorkspaceId);
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(currentWorkspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
   const workspaceId =
     legacyQueriesEnabled && activeOrganization?.id === currentWorkspaceId
       ? currentWorkspaceId
@@ -185,12 +187,14 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   // would falsely report "not loading" and flash the empty-state UI before the
   // repo list comes back. The shared helper waits on `isConvexAuthLoading`
   // so the spinner stays up across the reconnect window.
-  const workspaceReposLoading = isAuthedWorkspaceQueryLoading({
-    workspaceId,
-    isConvexAuthLoading,
-    canQuery,
-    queryResult: workspaceReposWithStatus,
-  });
+  const workspaceReposLoading =
+    (Boolean(currentWorkspaceId) && legacyQueryStatus === 'pending') ||
+    isAuthedWorkspaceQueryLoading({
+      workspaceId,
+      isConvexAuthLoading,
+      canQuery,
+      queryResult: workspaceReposWithStatus,
+    });
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -243,6 +247,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   const value = useMemo<SettingsDataCacheContextValue>(
     () => ({
       workspaceId,
+      workspaceModePending: Boolean(currentWorkspaceId) && legacyQueryStatus === 'pending',
       canManageGithub,
       usageTimelineByRange,
       usageCalendar,
@@ -253,6 +258,8 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
     }),
     [
       canManageGithub,
+      currentWorkspaceId,
+      legacyQueryStatus,
       repositories,
       usageTimelineByRange,
       usageCalendar,
@@ -287,7 +294,7 @@ export function useSettingsUsageDay(dayStartMs: number | null): {
   day: SettingsUsageDayData | undefined;
   loading: boolean;
 } {
-  const { workspaceId } = useSettingsDataCache();
+  const { workspaceId, workspaceModePending } = useSettingsDataCache();
   const { authSessionId, confirmedUnauthenticated } = useAuthenticatedConvex();
   const usageAvailable = usePlatformCapability('usageAnalytics');
   const cacheSessionId = usageAvailable && !confirmedUnauthenticated ? authSessionId : null;
@@ -356,6 +363,8 @@ export function useSettingsUsageDay(dayStartMs: number | null): {
 
   return {
     day,
-    loading: enabled && day === undefined,
+    loading:
+      (usageAvailable && workspaceModePending && dayStartMs !== null) ||
+      (enabled && day === undefined),
   };
 }

@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQueriesEnabled } from './use-workspace-feature';
+import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useMemo, useState } from 'react';
 import { useCloudMutation } from '@lody/platform/react';
@@ -118,7 +118,8 @@ export function useGithubProjectWorktreeSaves() {
 export function useGithubProjectWorktreeAdmin(): GithubProjectWorktreeAdmin {
   const { workspaceId } = useResolvedWorkspaceScope();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
   const canQuery = legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const repos = useLegacyWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
@@ -153,13 +154,14 @@ export function useGithubProjectWorktreeAdmin(): GithubProjectWorktreeAdmin {
   }, [cleanupErrorByKey, cleanupSavingByKey, repos, setupErrorByKey, setupSavingByKey]);
 
   const isLoading =
-    legacyQueriesEnabled &&
-    isAuthedWorkspaceQueryLoading({
-      workspaceId,
-      isConvexAuthLoading,
-      canQuery,
-      queryResult: repos ?? undefined,
-    });
+    (Boolean(workspaceId) && legacyQueryStatus === 'pending') ||
+    (legacyQueriesEnabled &&
+      isAuthedWorkspaceQueryLoading({
+        workspaceId,
+        isConvexAuthLoading,
+        canQuery,
+        queryResult: repos ?? undefined,
+      }));
 
   return { rowByRepoFullName, isLoading, onWorktreeSetupChange, onWorktreeCleanupChange };
 }

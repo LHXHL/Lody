@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQueriesEnabled } from './use-workspace-feature';
+import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -58,7 +58,8 @@ export function useVisibleMachineMetas(
   const syncMachineFlock = options.syncMachineFlock ?? true;
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
   const canQuery =
     enabled && legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
@@ -68,9 +69,11 @@ export function useVisibleMachineMetas(
     cloudOperations.machines.listVisibleMachines,
     enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
-  const rawAccessRows = enabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
+  const rawAccessRows =
+    enabled && legacyQueriesEnabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
   const isLoading =
     !enabled ||
+    legacyQueryStatus === 'pending' ||
     (legacyQueriesEnabled &&
       isAuthedWorkspaceQueryLoading({
         workspaceId,

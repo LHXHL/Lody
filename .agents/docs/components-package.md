@@ -28,8 +28,14 @@ the workspace Registry, and retain ordinary machine/readiness validation. Confir
 and prepared local file receipts keep their IPC paths. Encrypted attachments use per-file keys inside protected conversation content and opaque relay parts; preparation failures preserve the draft. The Loro pending queue prepares new images and files through that protected path and verifies their manifests before history writes. Direct ordinary uploads require an account/workspace-bound mode proof before any source bytes leave the client; unknown-mode admission waits before consuming the composer draft. The [attachment decision](../notes/implemented/architecture/2026-10-28-encrypted-attachments.md) explains historical reads, local backfill receipts and cloud authorization. Local failure cannot enable an unprotected upload. See the
 [availability decision](../notes/implemented/bug-fix/2026-10-27-e2ee-feature-availability.md).
 
-Legacy cloud machine/project visibility, inbox, GitHub and usage queries stay off
-in encrypted workspaces, including paired desktops. Visibility retains only the
+Legacy cloud machine/project visibility, inbox, GitHub and usage queries require
+an explicit ordinary or legacy descriptor from `workspaceContentModeAtom`, bound
+to the current account, workspace ID and routed slug. Unknown mode, including
+`descriptor: null` on a provisional runtime, keeps those catalogs pending. No
+query starts another describe or mode cache; runtime admission publishes the one
+verdict, including after recovery. Local runtime opening, reading and composer
+input remain available while verification runs. Encrypted workspaces keep these
+queries off, including paired desktops. Visibility retains only the
 existing local owner projection; absent legacy access rows never grant another
 member's machine. Account/control, billing and encrypted publication APIs retain
 their own supported paths. Ordinary query failures still reach their owning error

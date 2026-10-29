@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { TestCloudPlatformProvider } from './test-platform';
+import { TestOrdinaryWorkspaceProvider } from './test-platform';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -55,9 +55,9 @@ function Probe() {
 const render = async () => {
   await act(async () => {
     root.render(
-      <TestCloudPlatformProvider>
+      <TestOrdinaryWorkspaceProvider workspaceId="review-identity">
         <Probe />
-      </TestCloudPlatformProvider>
+      </TestOrdinaryWorkspaceProvider>
     );
   });
 };

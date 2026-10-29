@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQueriesEnabled } from '@/hooks/use-workspace-feature';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
@@ -696,7 +696,8 @@ function WorkspaceChatLanding({
     controlConnectionState === 'syncing';
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const { workspaceId } = useResolvedWorkspaceScope();
-  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
   const setLocalProjectSharedWithTeam = useCloudMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
@@ -840,13 +841,19 @@ function WorkspaceChatLanding({
     | null
     | undefined;
   const repositories = useMemo(
-    () => (legacyQueriesEnabled ? (freshRepositories ?? cachedRepositories ?? undefined) : []),
-    [legacyQueriesEnabled, freshRepositories, cachedRepositories]
+    () =>
+      legacyQueriesEnabled
+        ? (freshRepositories ?? cachedRepositories ?? undefined)
+        : legacyQueryStatus === 'blocked'
+          ? []
+          : undefined,
+    [legacyQueriesEnabled, legacyQueryStatus, freshRepositories, cachedRepositories]
   );
   const isElectron = isElectronRenderer();
   const launchMode = useMemo(() => detectAppLaunchMode(isElectron), [isElectron]);
   const hasGitHubRepos = (repositories?.length ?? 0) > 0;
-  const repositoriesReady = !legacyQueriesEnabled || freshRepositories !== undefined;
+  const repositoriesReady =
+    legacyQueryStatus === 'blocked' || (legacyQueriesEnabled && freshRepositories !== undefined);
   const sharingReviewState = useMemo(() => {
     const privateMachineIds = Array.from(accessByMachineId.values())
       .filter((access) => access.ownerUserId === userId && !access.sharedWithTeam)
