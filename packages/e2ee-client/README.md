@@ -68,6 +68,9 @@ failures remain retryable without sealing the ledger. Status and document sends
 may select a valid admitted retained epoch when the current key is missing;
 rotation advice does not block permitted sends. Revocation, a changed local
 incarnation, rollback or wrong scope still blocks key/RPC/content operations.
+For a missing committed epoch, the host first attempts the original staged group
+through the core receiver; unavailable staging still permits mailbox reception.
+An endorsed snapshot without the publication original uses mailbox/history.
 Core retains and verifies receive/report/distribution originals; the shared finite
 maintenance owner acknowledges only observed terminal results, including a
 successful sibling when another phase failed. There is no plaintext fallback.

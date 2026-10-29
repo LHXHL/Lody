@@ -23,6 +23,7 @@ import {
   WorkspaceControl,
 } from '@lody/e2ee-core';
 import {
+  getCommittedEpochStagingKey,
   requireLedgerContinuation,
   decodeRecord,
   type LedgerCommand,
@@ -208,7 +209,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       EpochPublisher.layer,
       InstalledEpochHistory.layer
     ).pipe(Layer.provideMerge(KeyReceiver.layer), Layer.provideMerge(InstalledEpochKeys.layer));
-    type Keys = Layer.Success<typeof keyLayer>;
+    type Keys = Layer.Success<typeof keyLayer> | EpochStagingStore;
     let keyServices: Context.Context<Keys> | undefined;
     let maintenance: Effect.Success<ReturnType<typeof makePersonalKeyMaintenance>> | undefined;
     const keySerial = yield* Semaphore.make(1);
@@ -279,10 +280,33 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       });
     const keyRound = () =>
       serial.withPermit(
-        withKeys((_ctx) =>
+        withKeys((ctx) =>
           Effect.gen(function* () {
-            const view = yield* admitted();
-            return { refreshRequired: yield* maintenance!(view.inspectState().epoch.number) };
+            const view = yield* admitted(),
+              epoch = view.inspectState().epoch.number;
+            const beforeReceive = Effect.gen(function* () {
+              if (epoch === 0) return undefined;
+              const checked = yield* Effect.result(
+                Context.get(ctx, InstalledEpochKeys).check(epoch)
+              );
+              if (Result.isSuccess(checked)) return undefined;
+              const located = getCommittedEpochStagingKey(view, epoch);
+              if (Result.isFailure(located)) {
+                if (view.verification === 'endorsed-snapshot') return undefined;
+                return yield* located.failure;
+              }
+              // Staging availability must not gate the independent verified mailbox path.
+              const group = yield* Context.get(ctx, EpochStagingStore)
+                .readGroup(located.success)
+                .pipe(Effect.catch(() => Effect.succeed(null)));
+              if (
+                group !== null &&
+                group.envelopes.some((row) => row.recipient === toHex(device.publicKey.toBytes()))
+              )
+                yield* Context.get(ctx, KeyReceiver).receiveStagedGroup(group);
+              return undefined;
+            });
+            return { refreshRequired: yield* maintenance!(epoch, beforeReceive) };
           })
         )
       );

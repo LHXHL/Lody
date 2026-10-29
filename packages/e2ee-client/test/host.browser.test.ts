@@ -110,6 +110,26 @@ it.each(['chromium', 'webkit'] as const)(
         rotationRequired: false,
       });
       expect((await call(page, 'seal')).ok).toBe(true);
+      expect((await call(page, 'stagingUnavailable')).ok).toBe(true);
+      expect((await call(page, 'keyRound')).ok).toBe(true);
+      expect(record(await call(page, 'status')).usableEpoch).toBe(0);
+      expect((await call(page, 'ledger')).ok).toBe(true);
+      // A stored group is not authority, even when its locator matched the committed epoch.
+      expect((await call(page, 'stageCurrent')).ok).toBe(true);
+      expect((await call(page, 'corruptStaged')).ok).toBe(true);
+      expect((await call(page, 'keyRound')).ok).toBe(false);
+      expect(record(await call(page, 'status')).usableEpoch).toBe(0);
+      expect((await call(page, 'seal')).ok).toBe(true);
+      // The publisher can disappear after staging + ledger commit, before mailbox delivery.
+      expect((await call(page, 'stageCurrent')).ok).toBe(true);
+      expect((await call(page, 'keyRound')).ok).toBe(true);
+      expect((await call(page, 'status')).value).toEqual({
+        currentEpoch: 1,
+        usableEpoch: 1,
+        rotationRequired: false,
+      });
+      expect((await call(page, 'seal')).ok).toBe(true);
+      expect((await call(page, 'openBody')).value).toEqual([72, 105]);
       expect((await call(page, 'revoke')).ok).toBe(true);
       expect((await call(page, 'refresh')).ok).toBe(true);
       expect(record(await call(page, 'ledger')).length).toBe(5);

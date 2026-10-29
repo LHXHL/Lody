@@ -27,6 +27,8 @@ import {
   encodeCbor,
   commitEpochKey,
   sealHistoryPacket,
+  getCommittedEpochStagingKey,
+  type EpochStagedGroup,
 } from '@lody/e2ee-core/protocol';
 import {
   ClientInstallationStore,
@@ -36,6 +38,7 @@ import {
   LedgerPinStore,
   LedgerLog,
   LedgerLogError,
+  BackendError,
   SubmissionJournal,
   WorkspaceScope,
   KeyMailbox,
@@ -68,6 +71,8 @@ let offer: PersonalPairingOffer,
 const FIXED_NOW = 1_800_000_000_000;
 let fixedClock: Clock.Clock;
 let failControl = false;
+let stagedGroup: EpochStagedGroup | null = null;
+let failStaging = false;
 let oldSession: typeof session;
 let loseBegin = false,
   holdBegin = false,
@@ -217,7 +222,7 @@ export async function boot(input: typeof mode = 'create-or-open') {
                   events.push('fetch');
                   const current = view(),
                     target = current.inspectState().devices.get(toHex(binding.device.toBytes()));
-                  if (!target) return { items: [], next: null };
+                  if (!target || epoch > 0) return { items: [], next: null };
                   const prepared = yield* prepareEpochEnvelope({
                     context: {
                       genesis: binding.genesis,
@@ -262,10 +267,24 @@ export async function boot(input: typeof mode = 'create-or-open') {
             }),
             Layer.succeed(EpochStagingStore, {
               stageGroup: () => Effect.void,
-              readGroup: () => Effect.succeed(null),
+              readGroup: () =>
+                Effect.gen(function* () {
+                  if (failStaging) {
+                    failStaging = false;
+                    return yield* Effect.fail(
+                      new BackendError({
+                        service: 'EpochStagingStore',
+                        reason: 'unavailable',
+                      })
+                    );
+                  }
+                  return stagedGroup;
+                }),
               deleteGroup: () => Effect.void,
             }),
-            Layer.succeed(EpochPublicationSource, { current: () => Effect.succeed(records[0]) })
+            Layer.succeed(EpochPublicationSource, {
+              current: () => Effect.succeed(stagedGroup?.record ?? records[0]),
+            })
           );
         },
         evidence: (binding) =>
@@ -591,6 +610,35 @@ export async function invoke(action: string) {
               yield* signLedgerRecord(Result.getOrThrow(prepareLedgerRecord(view(), body)), owner)
             );
             retain();
+            return true;
+          }
+          case 'stagingUnavailable':
+            failStaging = true;
+            return true;
+          case 'corruptStaged':
+            stagedGroup = { ...stagedGroup!, genesis: '77'.repeat(32) };
+            return true;
+          case 'stageCurrent': {
+            const current = view(),
+              epoch = current.inspectState().epoch.number,
+              locator = Result.getOrThrow(getCommittedEpochStagingKey(current, epoch)),
+              next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(0x72)));
+            const envelopes = [];
+            for (const recipient of current.inspectState().devices.keys()) {
+              const frame = yield* prepareEpochEnvelope({
+                context: {
+                  genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash))),
+                  epoch: Result.getOrThrow(Bytes.epochNumber(epoch)),
+                  sender: owner.publicKey,
+                  recipient: Result.getOrThrow(Bytes.signingPublicKey(fromHex(recipient))),
+                },
+                key: next,
+                signer: owner,
+                ledger: () => Effect.succeed(current),
+              });
+              envelopes.push({ recipient, frame });
+            }
+            stagedGroup = { ...locator, record: records.at(-1)!, envelopes };
             return true;
           }
           case 'ledger': {
