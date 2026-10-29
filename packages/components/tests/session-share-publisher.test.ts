@@ -3,6 +3,57 @@ import { decodeShareHistoryBytes } from '@lody/shared/session-sharing';
 import { captureSessionShare } from '../src/lib/session-share-publisher';
 vi.mock('@/lib', () => ({ API_BASE_URL: 'https://api.example.test' }));
 
+it('waits for content admission before detaching a plaintext share package', async () => {
+  const mode = Promise.withResolvers<void>();
+  const waiting = Promise.withResolvers<void>();
+  let sourceRead = false;
+  const capturing = captureSessionShare({
+    runtime: {
+      workspaceId: 'workspace',
+      contentMode: 'plaintext',
+      waitForContentAdmission: () => {
+        waiting.resolve();
+        return mode.promise;
+      },
+      prepareSessionTarget: async () => {},
+      acquireSessionStore: async () => {
+        sourceRead = true;
+        return {
+          sessionId: 'root',
+          firstSynced: Promise.resolve(),
+          acquireSync: () => () => {},
+          sessionData: {
+            history: {
+              readAll: async () => [
+                {
+                  id: 'turn',
+                  role: 'user',
+                  items: [{ type: 'text', text: 'C1 private share sentinel' }],
+                },
+              ],
+            },
+          },
+        };
+      },
+      releaseSessionStoreRef: () => {},
+    },
+    sessions: [{ id: 'root', title: 'Private title' }],
+    rootSessionId: 'root',
+    token: 'test',
+    signal: new AbortController().signal,
+  } as unknown as Parameters<typeof captureSessionShare>[0]);
+  try {
+    await Promise.race([waiting.promise, capturing]);
+    expect(sourceRead).toBe(false);
+    mode.resolve();
+    const result = await capturing;
+    expect(result.manifest.conversations[0]?.title).toBe('Private title');
+  } finally {
+    mode.resolve();
+    await capturing;
+  }
+});
+
 it.each(['plaintext', 'e2ee'] as const)(
   'captures %s sources through the same package path and releases all leases',
   async (contentMode) => {

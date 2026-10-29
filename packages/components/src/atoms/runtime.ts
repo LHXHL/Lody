@@ -187,6 +187,8 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  /** Local document access is independent of permission to transmit content. */
+  waitForContentAdmission?: (signal?: AbortSignal) => Promise<void>;
   /**
    * The workspace slug used for caching the (slug, id) mapping.
    */

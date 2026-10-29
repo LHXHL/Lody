@@ -84,6 +84,7 @@ import {
 } from '@/lib/e2ee-workspace-storage';
 import {
   describeAuthenticatedWorkspace,
+  waitForWorkspaceContentAdmission,
   isWorkspaceModeRejection,
   WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
   WorkspaceModeAdmissionTimeoutError,
@@ -589,6 +590,51 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
 
     const initializationAbort = new AbortController();
+    const newAdmission = () => {
+      const admission = Promise.withResolvers<void>();
+      // Background classification can fail before an outbound consumer exists.
+      void admission.promise.catch(() => {});
+      return admission;
+    };
+    let plaintextAdmission = newAdmission();
+    let admissionFailed = false;
+    let verifiedOrdinary = false;
+    let modeVerification: Promise<void> | null = null;
+    if (!isLocalPlatform && !modeCloud)
+      plaintextAdmission.reject(new Error('e2ee_workspace_mode_unavailable'));
+    const waitForContentAdmission = async (signal: AbortSignal) => {
+      const owned = AbortSignal.any([signal, initializationAbort.signal]);
+      const assertOwner = () => {
+        owned.throwIfAborted();
+        const session = platform.identity.session.get();
+        if (
+          disposed ||
+          retired ||
+          session.status === 'unauthenticated' ||
+          (session.status === 'authenticated' && session.user.id !== accountId)
+        )
+          throw new Error('e2ee_account_changed');
+      };
+      const readProof = () => {
+        if (!modeCloud || !accountId) return null;
+        const evidence = readWorkspaceModeEvidence(localStorage, accountId, effectiveWorkspaceId);
+        if (evidence.encrypted || evidence.rejected) {
+          retire();
+          setModeStorageRevision((value) => value + 1);
+          throw new WorkspaceModeMismatchError();
+        }
+        return evidence.descriptor;
+      };
+      assertOwner();
+      const proof = readProof();
+      if (proof && !verifiedOrdinary) admit(proof);
+      // Each failed attempt reports to its current waiters. It is not a mode
+      // verdict: a later send may verify again or adopt SEC1's matching proof.
+      if (admissionFailed) void verifyInBackground();
+      await waitForWorkspaceContentAdmission(plaintextAdmission.promise, owned);
+      assertOwner();
+      readProof();
+    };
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
     let disposal: Promise<void> | null = null;
     let nativeLease: string | null = null;
@@ -701,59 +747,94 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceId: effectiveWorkspaceId,
         descriptor,
       });
-    };
-
-    const verifyInBackground = async () => {
-      let notPlaintext = false;
-      try {
-        const descriptor = await describeAuthenticatedWorkspace(
-          {
-            session: platform.identity.session,
-            workspaces: platform.e2eeWorkspaces!,
-            accountId: accountId!,
-            workspaceId: effectiveWorkspaceId,
-            signal: initializationAbort.signal,
-          },
-          null
-        );
-        if (disposed) return;
-        if (descriptor.workspaceId !== effectiveWorkspaceId) throw new WorkspaceModeMismatchError();
-        if (isEncryptedDescriptor(descriptor)) {
-          // Never keep the plaintext data plane for an encrypted workspace:
-          // retire it first, then record the mode synchronously as sticky
-          // evidence, so any re-initialization waits for admission.
-          notPlaintext = true;
-          retire();
-        }
-        admit(descriptor);
-      } catch (error) {
-        if (disposed) return;
-        if (!notPlaintext && !isWorkspaceModeRejection(error)) {
-          // Unclassified failures are not evidence of encryption; keep the
-          // ordinary runtime and verify again on the next initialization.
-          logRuntimeOperationError('background workspace mode verification', error);
-          return;
-        }
-        logRuntimeOperationError('background workspace mode verification', error);
-        retire();
-        // The server did not admit this workspace as plaintext (or its encrypted
-        // mode could not be recorded). Every later attempt, including Retry, must
-        // wait for authoritative admission instead of opening provisionally.
-        if (
-          !recordWorkspaceModeRejection(
-            localStorage,
-            accountId!,
-            effectiveWorkspaceId,
-            describeErrorType(error)
-          )
-        )
-          sessionModeRejectionsRef.current.add(JSON.stringify([accountId, effectiveWorkspaceId]));
-        setContentMode(null);
-        setRuntimeInitFailure(modeAdmissionFailure(error));
-        setControlConnectionState('error');
-        setModeStorageRevision((value) => value + 1);
+      if (!isEncryptedDescriptor(descriptor)) {
+        const recovering = admissionFailed;
+        if (recovering && !modeVerification) plaintextAdmission = newAdmission();
+        admissionFailed = false;
+        verifiedOrdinary = true;
+        plaintextAdmission.resolve();
+        if (recovering && workspaceRuntime && tokenRef.current)
+          void workspaceRuntime.setAuthToken(tokenRef.current).catch((error: unknown) => {
+            logRuntimeOperationError('resume remote sync after content admission', error);
+          });
       }
     };
+
+    const verifyInBackground = (): Promise<void> => {
+      if (modeVerification) return modeVerification;
+      if (admissionFailed) {
+        plaintextAdmission = newAdmission();
+      }
+      const pending = (async () => {
+        let notPlaintext = false;
+        try {
+          const descriptor = await describeAuthenticatedWorkspace(
+            {
+              session: platform.identity.session,
+              workspaces: platform.e2eeWorkspaces!,
+              accountId: accountId!,
+              workspaceId: effectiveWorkspaceId,
+              signal: initializationAbort.signal,
+            },
+            null
+          );
+          if (disposed) return;
+          if (descriptor.workspaceId !== effectiveWorkspaceId)
+            throw new WorkspaceModeMismatchError();
+          if (isEncryptedDescriptor(descriptor)) {
+            // Never keep the plaintext data plane for an encrypted workspace:
+            // retire it first, then record the mode synchronously as sticky
+            // evidence, so any re-initialization waits for admission.
+            notPlaintext = true;
+            retire();
+          }
+          admit(descriptor);
+        } catch (error) {
+          if (disposed) return;
+          if (!notPlaintext && !isWorkspaceModeRejection(error)) {
+            // Unclassified failures are not evidence of encryption; keep the
+            // ordinary Repo. A later send or online edge may verify again.
+            logRuntimeOperationError('background workspace mode verification', error);
+            if (!verifiedOrdinary) {
+              admissionFailed = true;
+              modeVerification = null;
+              plaintextAdmission.reject(error);
+            }
+            return;
+          }
+          logRuntimeOperationError('background workspace mode verification', error);
+          retire();
+          // The server did not admit this workspace as plaintext (or its encrypted
+          // mode could not be recorded). Every later attempt, including Retry, must
+          // wait for authoritative admission instead of opening provisionally.
+          if (
+            !recordWorkspaceModeRejection(
+              localStorage,
+              accountId!,
+              effectiveWorkspaceId,
+              describeErrorType(error)
+            )
+          )
+            sessionModeRejectionsRef.current.add(JSON.stringify([accountId, effectiveWorkspaceId]));
+          setContentMode(null);
+          setRuntimeInitFailure(modeAdmissionFailure(error));
+          setControlConnectionState('error');
+          setModeStorageRevision((value) => value + 1);
+        }
+      })();
+      modeVerification = pending;
+      const settled = () => {
+        if (modeVerification === pending) modeVerification = null;
+      };
+      void pending.then(settled, settled);
+      return pending;
+    };
+
+    const retryContentAdmission = () => {
+      if (!modeCloud || !accountId || disposed || retired || verifiedOrdinary) return;
+      void waitForContentAdmission(initializationAbort.signal).catch(() => {});
+    };
+    window.addEventListener('online', retryContentAdmission);
 
     const retire = () => {
       if (retired) return;
@@ -874,6 +955,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         });
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
+          ...(!isLocalPlatform && !encryptedAccess && !storedDescriptor
+            ? { waitForContentAdmission }
+            : {}),
           ...(encryptedAccess
             ? { e2ee: encryptedAccess.e2ee, e2eeLocalIdentity: localIdentity }
             : {}),
@@ -979,6 +1063,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceSlug,
       });
       disposed = true;
+      window.removeEventListener('online', retryContentAdmission);
       window.removeEventListener('online', refreshNative);
       unsubscribeLedgerChange();
       initializationAbort.abort();

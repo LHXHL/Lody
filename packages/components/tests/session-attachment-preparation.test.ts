@@ -566,3 +566,66 @@ it('refuses an unprotected preparation receipt without losing the draft source',
   expect(f.turns()).toEqual([]);
   expect(local.files).toEqual([]);
 });
+
+it('keeps an unknown-mode text draft unconsumed across rejection and an explicit retry', async () => {
+  const f = fixture();
+  const mode = Promise.withResolvers<void>();
+  const waiting = Promise.withResolvers<void>();
+  void mode.promise.catch(() => {});
+  let draft = 'C1 unaccepted draft sentinel';
+  const entry = send('unknown-text', []).entry;
+  entry.inputConfig!.inputBlocks = [{ type: 'text', text: draft }];
+  let admitted = false;
+  const runtime = {
+    ...f.runtime,
+    workspaceId: 'workspace',
+    contentMode: 'plaintext',
+    waitForContentAdmission: () => {
+      waiting.resolve();
+      return admitted ? Promise.resolve() : mode.promise;
+    },
+  } as unknown as WorkspaceRuntime;
+  const sending = acceptSessionUserTurn(
+    runtime,
+    SESSION,
+    entry,
+    { kind: 'history' },
+    undefined,
+    undefined,
+    undefined,
+    () => {
+      draft = '';
+    }
+  );
+  const rejectedSend = expect(sending).rejects.toThrow('mode unavailable');
+  void rejectedSend.catch(() => {});
+  try {
+    await Promise.race([waiting.promise, sending.catch(() => {})]);
+    expect(draft).toBe('C1 unaccepted draft sentinel');
+    expect(f.turns()).toEqual([]);
+    mode.reject(new Error('mode unavailable'));
+    await rejectedSend;
+    expect(draft).toBe('C1 unaccepted draft sentinel');
+    admitted = true;
+    await acceptSessionUserTurn(
+      runtime,
+      SESSION,
+      entry,
+      { kind: 'history' },
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        draft = '';
+      }
+    );
+    expect(draft).toBe('');
+    expect(f.turns().map((turn) => turn.inputConfig?.inputBlocks)).toEqual([
+      [{ type: 'text', text: 'C1 unaccepted draft sentinel' }],
+    ]);
+  } finally {
+    mode.reject(new Error('mode unavailable'));
+    await sending.catch(() => {});
+    await rejectedSend.catch(() => {});
+  }
+});

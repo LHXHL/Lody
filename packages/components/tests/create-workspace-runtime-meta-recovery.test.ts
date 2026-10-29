@@ -413,6 +413,7 @@ import {
   resolveWorkspaceRuntimeCacheIdentity,
 } from '../src/providers/create-workspace-runtime';
 import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '../src/lib/clear-local-cache';
+import { waitForWorkspaceContentAdmission } from '../src/providers/workspace-mode-admission';
 
 describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   beforeEach(() => {
@@ -739,6 +740,283 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       await reopened.destroy();
     }
   });
+
+  it('keeps local drafts available while unknown mode blocks every cloud request', async () => {
+    const admitted = Promise.withResolvers<void>();
+    const waiting = Promise.withResolvers<void>();
+    const requests: string[] = [];
+    mocks.realTokenProvider = true;
+    vi.stubGlobal('fetch', async (url: string) => {
+      requests.push(String(url));
+      return new Response('denied', { status: 403 });
+    });
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const repo = await RealRepo.create({ metaDebounceCommitMs: 0 });
+    mocks.repoOverride = repo;
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      waitForContentAdmission: () => {
+        waiting.resolve();
+        return admitted.promise;
+      },
+    });
+    const draft = await repo.openPersistedDoc('draft');
+    draft.doc.getText('text').insert(0, 'C1 private draft sentinel');
+    draft.doc.commit();
+    const attaching = runtime.setAuthToken('auth-token').catch(() => {});
+    try {
+      await Promise.race([waiting.promise, attaching]);
+      expect(draft.doc.getText('text').toString()).toBe('C1 private draft sentinel');
+      expect(requests).toEqual([]);
+      admitted.resolve();
+      await attaching;
+      expect(requests.some((url) => url.includes('loro'))).toBe(true);
+    } finally {
+      admitted.resolve();
+      await attaching;
+      await runtime.dispose();
+    }
+  });
+
+  it('returns the local Repo before admission even when cloud startup already has a token', async () => {
+    const admitted = Promise.withResolvers<void>();
+    const waiting = Promise.withResolvers<void>();
+    const requests: string[] = [];
+    mocks.realTokenProvider = true;
+    vi.stubGlobal('fetch', async (url: string) => {
+      requests.push(String(url));
+      return new Response('denied', { status: 403 });
+    });
+    let published: Awaited<ReturnType<typeof createWorkspaceRuntime>> | undefined;
+    const opening = createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'initial-token',
+      waitForContentAdmission: (signal) => {
+        waiting.resolve();
+        return waitForWorkspaceContentAdmission(admitted.promise, signal);
+      },
+    }).then((runtime) => {
+      published = runtime;
+      return runtime;
+    });
+    // Observe both success and failure immediately; cleanup owns the result.
+    void opening.catch(() => {});
+    await waiting.promise;
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(published?.repo).toBe(window.repo);
+      expect(published).toBeDefined();
+      expect(requests).toEqual([]);
+      await published!.dispose();
+      admitted.resolve();
+      await opening;
+      expect(requests).toEqual([]);
+    } finally {
+      admitted.resolve();
+      await opening.then(
+        (runtime) => runtime.dispose(),
+        () => {}
+      );
+    }
+  });
+
+  it.each(['cloud', 'dual'] as const)(
+    'holds refreshed tokens and reconnect wakes behind unknown-mode admission (%s)',
+    async (syncMode) => {
+      if (syncMode === 'dual') enableElectronLocalDataPlane();
+      const admitted = Promise.withResolvers<void>();
+      const requests: string[] = [];
+      mocks.realTokenProvider = true;
+      vi.stubGlobal('fetch', async (url: string) => {
+        requests.push(String(url));
+        return new Response('denied', { status: 403 });
+      });
+      const runtime = await createWorkspaceRuntime({
+        content: { mode: 'plaintext' },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        syncMode,
+        waitForContentAdmission: (signal) =>
+          waitForWorkspaceContentAdmission(admitted.promise, signal),
+      });
+      const first = runtime.setAuthToken('old-token').then(
+        () => 'admitted',
+        (error) => error.name
+      );
+      const refreshed = runtime.setAuthToken('refreshed-token').catch(() => {});
+      try {
+        expect(await first).toBe('AbortError');
+        dispatchWindowEvent('online');
+        dispatchDocumentEvent('visibilitychange');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(requests).toEqual([]);
+        await runtime.dispose();
+        admitted.resolve();
+        await refreshed;
+        expect(requests).toEqual([]);
+      } finally {
+        await runtime.dispose();
+      }
+    }
+  );
+
+  it.each(['cloud', 'dual'] as const)(
+    'resumes ordinary synchronization on the same Repo after a failed mode read recovers (%s)',
+    async (syncMode) => {
+      if (syncMode === 'dual') enableElectronLocalDataPlane();
+      let available = false;
+      const failure = new Error('workspace_access_denied');
+      const requests: string[] = [];
+      const attached = new Set<string>();
+      mocks.realTokenProvider = true;
+      mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+      const addTransport = mocks.addTransport.getMockImplementation();
+      mocks.addTransport.mockImplementation(async (id) => {
+        attached.add(id);
+      });
+      vi.stubGlobal('fetch', async (url: string) => {
+        requests.push(String(url));
+        return new Response('denied', { status: 403 });
+      });
+      const runtime = await createWorkspaceRuntime({
+        content: { mode: 'plaintext' },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        syncMode,
+        waitForContentAdmission: async () => {
+          if (!available) throw failure;
+        },
+      });
+      const repo = runtime.repo;
+      try {
+        await expect(runtime.setAuthToken('auth-token')).rejects.toBe(failure);
+        expect(requests).toEqual([]);
+        expect(attached.size).toBe(0);
+        available = true;
+        await runtime.setAuthToken('auth-token').catch(() => {});
+        expect(runtime.repo).toBe(repo);
+        if (syncMode === 'dual') expect(attached.has('local')).toBe(true);
+        expect(requests.some((url) => url.includes('loro-streams/token'))).toBe(true);
+      } finally {
+        await runtime.dispose();
+        mocks.addTransport.mockImplementation(addTransport!);
+      }
+    }
+  );
+
+  it('holds desktop cloud document bytes locally until classification admits the local bridge', async () => {
+    vi.useRealTimers();
+    enableElectronLocalDataPlane();
+    const { indexedDB, IDBKeyRange } = await import('fake-indexeddb');
+    vi.stubGlobal('indexedDB', indexedDB);
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const repo = await RealRepo.create({
+      metaDebounceCommitMs: 0,
+      resolveRoomTransports: () => ({ transportIds: ['local'] }),
+    });
+    const admitted = Promise.withResolvers<void>();
+    const waiting = Promise.withResolvers<void>();
+    const connected = Promise.withResolvers<void>();
+    const sent: Uint8Array[] = [];
+    const adapter: TransportAdapter = {
+      connect: async () => {},
+      close: async () => {},
+      isConnected: () => true,
+      getStatus: () => 'connected',
+      onStatusChange: () => () => {},
+      syncMeta: async () => ({ ok: true }),
+      joinMetaRoom: () => createMetaSub(Promise.resolve()),
+      syncDoc: async (_id, doc) => {
+        sent.push(doc.export({ mode: 'snapshot' }));
+        return { ok: true };
+      },
+      joinDocRoom: () => createMetaSub(Promise.resolve()),
+    };
+    const add = repo.addTransport.bind(repo);
+    vi.spyOn(repo, 'addTransport').mockImplementation(async (id, _adapter, options) => {
+      await add(id, adapter, options);
+      connected.resolve();
+    });
+    mocks.repoOverride = repo;
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      syncMode: 'dual',
+      waitForContentAdmission: (signal) => {
+        waiting.resolve();
+        return waitForWorkspaceContentAdmission(admitted.promise, signal);
+      },
+    });
+    try {
+      await Promise.race([waiting.promise, connected.promise]);
+      const draft = await repo.openPersistedDoc('private-draft');
+      draft.doc.getText('text').insert(0, 'C1 desktop cloud draft sentinel');
+      draft.doc.commit();
+      await repo.sync({ scope: 'doc', docIds: ['private-draft'] });
+      expect(sent).toEqual([]);
+      expect(draft.doc.getText('text').toString()).toBe('C1 desktop cloud draft sentinel');
+      admitted.resolve();
+      await connected.promise;
+      await repo.sync({ scope: 'doc', docIds: ['private-draft'] });
+      const { LoroDoc } = await import('loro-crdt');
+      const received = sent.map((bytes) => {
+        const doc = new LoroDoc();
+        doc.import(bytes);
+        return doc.getText('text').toString();
+      });
+      expect(received).toContain('C1 desktop cloud draft sentinel');
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it.each(['logout', 'dispose', 'rejected mode'] as const)(
+    'does not revive a held ordinary token after %s and a late classification',
+    async (reason) => {
+      const admission = Promise.withResolvers<void>();
+      const waiting = Promise.withResolvers<void>();
+      const requests: string[] = [];
+      mocks.realTokenProvider = true;
+      vi.stubGlobal('fetch', async (url: string) => {
+        requests.push(String(url));
+        return new Response('denied', { status: 403 });
+      });
+      const runtime = await createWorkspaceRuntime({
+        content: { mode: 'plaintext' },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        waitForContentAdmission: (signal) => {
+          waiting.resolve();
+          return waitForWorkspaceContentAdmission(admission.promise, signal);
+        },
+      });
+      const attaching = runtime.setAuthToken('old-account-token');
+      const rejected = expect(attaching).rejects.toThrow();
+      await waiting.promise;
+      try {
+        if (reason === 'logout') await runtime.setAuthToken(null);
+        else if (reason === 'dispose') await runtime.dispose();
+        else admission.reject(new Error('e2ee_workspace_mode_unavailable'));
+        await rejected;
+        admission.resolve();
+        expect(requests).toEqual([]);
+      } finally {
+        await runtime.dispose();
+      }
+    }
+  );
 
   it('binds every persistent runtime cache to the same window identity', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
