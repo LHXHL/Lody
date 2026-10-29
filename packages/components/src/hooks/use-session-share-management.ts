@@ -240,6 +240,7 @@ export function useSessionShareStatus(
 }
 
 type PendingPublication = {
+  source: { runtime: WorkspaceRuntime; accountId: string | null; scopeKey: string };
   delivery?: ShareDeliveryEnvelope;
   deployment?: SessionShareView & { deploymentId: string };
   sealed?: boolean;
@@ -473,6 +474,7 @@ export function useSessionShareManagement(
     assertConsent(consent);
     const expected = !confirmation && captureEntry?.status === 'active' ? captureEntry : null;
     const value: PendingPublication = {
+      source: { runtime, accountId: userId ?? null, scopeKey: publicationScopeKey },
       prepared,
       expected,
       requestId: crypto.randomUUID(),
@@ -492,6 +494,20 @@ export function useSessionShareManagement(
     if (!lifetime.current) throw new Error('Share confirmation changed');
     const { expected, prepared, uploadSecret, readerSecret, requestId } = value;
     const requestConfirmation = consent ? consent.confirmation : confirmation;
+    const assertSource = () => {
+      if (
+        value.source.runtime !== store.get(activeWorkspaceRuntimeAtom) ||
+        value.source.accountId !== (store.get(userAtom)?.id ?? null) ||
+        value.source.scopeKey !== currentPublication.current.scopeKey
+      )
+        throw new ShareConsentChangedError();
+      lifetime.current!.signal.throwIfAborted();
+    };
+    const admitSource = async () => {
+      await value.source.runtime.waitForContentAdmission?.(lifetime.current!.signal);
+      assertSource();
+    };
+    await admitSource();
     assertConsent(consent, value);
     if (requestConfirmation && !value.delivery) {
       const secret = readerSecret ?? (expected && actions.secretFor(expected));
@@ -513,6 +529,7 @@ export function useSessionShareManagement(
       const credentialHash = readerSecret ? await hashSessionShareSecret(readerSecret) : undefined;
       const uploadCredentialHash = await hashSessionShareSecret(uploadSecret);
       // These hashes and capture can yield; validate immediately before the first plaintext egress.
+      await admitSource();
       assertConsent(consent, value);
       deployment = await begin({
         workspaceId,
@@ -536,6 +553,8 @@ export function useSessionShareManagement(
     if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
     assertConsent(consent, value);
     if (!value.sealed) {
+      await admitSource();
+      assertConsent(consent, value);
       setStage('upload');
       await uploadPreparedShare({
         origin: import.meta.env.VITE_SERVER_URL,
@@ -556,6 +575,8 @@ export function useSessionShareManagement(
     assertConsent(consent, value);
     setStage('publish');
     setPhase('publishing');
+    await admitSource();
+    assertConsent(consent, value);
     const updated = await publish({ deploymentId: deployment.deploymentId });
     // A new link (not an update of an existing one) is a created share.
     if (readerSecret)

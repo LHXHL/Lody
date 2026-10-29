@@ -2,6 +2,11 @@
 
 `CLAUDE.md` links here; ancestor rules apply.
 
+`CloudPlatformProvider` also wraps standalone login without authenticated Convex
+context. Keep organization queries and E2EE email inbox hosts in its optional
+authenticated child; absence of that context must still render login. The shared
+router supplies the context and retains workspace actions and owner/admin inboxes.
+
 ## Mirrors over synced docs tolerate unknown root keys
 
 Synced Mirrors require `ignoreUnknownProperties: true` or new peers block writes.
@@ -77,6 +82,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
+- Unknown workspace mode permits local Repo access, never ordinary body egress.
+  Preserve drafts until authenticated classification; retire and cancel provisional
+  transports before recording an encrypted or contradictory verdict.
 - Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
   leases. No plaintext bypass. Keep retained-epoch sends; select confirmed keys per
   operation. Forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.

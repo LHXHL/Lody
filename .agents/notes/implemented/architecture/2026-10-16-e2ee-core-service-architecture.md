@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2053)
 
 [中文](2026-10-16-e2ee-core-service-architecture.zh.md)
 
@@ -12,12 +13,12 @@ own SQLite files, took raw callbacks for remote systems and kept a private
 rollback pin. That made the library hard to reuse outside Lody, hard to read,
 and impossible to run against another backend or store. The core is now split
 into ports (Effect services the application provides), workflows (services the
-library implements as Layers on those ports only) and adapters (SQLite and Loro
-Streams implementations), behind six role-based entries plus an unstable
-`./internal`. Protocol bytes, file formats' guarantees and workflow behavior
-are preserved; every existing behavioral test still runs against the real
-Layers, and the main remaining limit is that only Node SQLite and Loro Streams
-adapters exist.
+library implements as Layers on those ports only) and adapters, behind role-based
+entries plus an unstable `./internal`. Node SQLite, browser ledger/original
+IndexedDB, JS curves and Loro Streams adapters implement separate capabilities;
+storage never grants authority. Protocol bytes and workflow guarantees stay with
+the existing core. Persistent browser key protection and product composition remain
+separate from these storage and crypto adapters.
 
 ## Problem
 
@@ -46,10 +47,10 @@ adapters exist.
    that depends only on ports and protocol code. `E2eeWorkflows` composes them.
 3. **One rollback guard.** `VerifiedLedger` with a single `LedgerPinStore`
    replaces the per-store pins. Pin-fault coverage moved to one owning suite.
-4. **Adapters** (`./adapters/node-sqlite`, `./adapters/loro-streams`). Each
-   store mutation verifies its own write and the file's workspace/device
-   binding inside its transaction, so a tampered or ignored write rolls back,
-   as the old stores did.
+4. **Adapters** implement ports behind separate entries. Store mutations verify
+   their own write and captured binding inside the same transaction, so an ignored
+   or mismatched write aborts. SQLite remains the reference for all local ports;
+   IndexedDB supplies only ledger/pin/submission and pairing originals.
 5. **Backend contract** (`./host`): staging DTOs as Effect Schemas, request
    signing bytes and stage-request checks, plus the mailbox rule functions.
    Platform-neutral; `@lody/cloud-api` re-exports the staging contract instead
@@ -130,26 +131,32 @@ adapters exist.
 - The Lab projects service errors by `reason` and protocol errors by `code`;
   the staging adapter keeps a backend refusal's reason.
 
+## Browser storage boundary
+
+A per-device database was rejected: replacing a lost identity would also lose its
+workspace rollback knowledge and unresolved originals. The IndexedDB adapter keeps
+one stable account/workspace/genesis database. Pairing rows add the local device,
+installation, session and purpose; replacement retains old exchanges. Its pin
+revision token is a local CAS precondition, never an authority or mode cache.
+
+The adapter uses native short callback transactions rather than awaiting crypto
+or network inside IDB. Strict durability is a browser hint; `complete`, after
+readback and binding checks, is the observable success boundary. Closing fences
+new work and drains actual transaction promises; unknown results reconcile from
+retained first bytes. No fallback database or implicit reset restores availability.
+The host must independently requalify retained ledger state and verify approval,
+protect secret pairing material before storage, and handle loss of persistent
+protection under the [custody contract](../../../../specs/e2ee/client-custody.md).
+Receive/epoch/mailbox/outbox/repair/snapshot journals remain a separate capability.
+
 ## Verification
 
-Core: 20 test files (356 tests), including composition and public-docs tests, on real
-SQLite, Ed25519, HPKE and child processes. `test/composition.test.ts` delivers a key between two devices
-through `E2eeWorkflows`. `test/public-docs.test.ts` requires JSDoc on every
-public export, namespace export and service member and that `docs/surface*.md`
-match the exports. Contract-completion tests also check typed source failure
-without pin advancement and completed query/acknowledgement spans. The follow-up
-passed core typecheck, type-aware lint (existing warnings), Effect lint (advisory
-warnings) and root format. Full root `check`, public-boundary and docs checks
-could not finish cleanly in the isolated worktree: other package dependencies
-and ACP submodules are absent. No E2EE documentation errors were reported.
-
-The assembled five-layer stack also passes core typecheck, Lab typecheck, all
-401 core tests and all 201 Lab tests. The workspace maps refresh failures into
-`LedgerViewSourceError`, and the Lab's relocated component harness preserves the
-same port contract. Workspace/recovery service members are covered by the stricter
-documentation check. These local synthetic results are not production acceptance.
-
-Limits: Lab and desktop consumers are migrated in the later PRs of the stack;
-no IndexedDB or mobile storage adapters exist; production composition is still
-not wired. The package is still private at version `0.0.0`; reusable service
-boundaries do not mean that a standalone SDK or backend has been published.
+`packages/e2ee-core/test/composition.test.ts` uses real workflow Layers and crypto
+for device key delivery. `packages/e2ee-core/test/public-docs.test.ts` checks JSDoc
+and entry surfaces. `packages/e2ee-core/test/indexeddb.browser.test.ts` uses real
+Chromium/WebKit persistent profiles, process reopen, competing tabs, native abort/
+quota/mismatched-write faults and close. It pins exact original retention, atomic
+record/cursor rollback and qualified retained-state reopen. These synthetic
+browser-engine checks do not establish minimum-OS, real-device or production
+acceptance. The package remains private at `0.0.0`; reusable boundaries do not
+publish a standalone SDK or enable a product host.

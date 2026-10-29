@@ -774,6 +774,60 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({ contentMode: 'e2ee' });
   });
 
+  it.each(['plaintext', 'encrypted', 'account change'] as const)(
+    'keeps the provisional Repo local and releases its content gate only for %s admission',
+    async (answer) => {
+      ordinaryCloud();
+      const descriptor =
+        Promise.withResolvers<Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>>();
+      environment.e2eeWorkspaces!.describe = () => descriptor.promise;
+      await render();
+      const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+      const outcome = gate(new AbortController().signal).then(
+        () => 'admitted',
+        () => 'cancelled'
+      );
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      expect(prepared.metadata.get('session')).toBe('already prepared');
+      if (answer === 'account change') {
+        await act(async () => store.set(userAtom, { id: 'other-account' } as never));
+      }
+      await act(async () =>
+        descriptor.resolve(
+          answer === 'encrypted'
+            ? encryptedDescriptor('local:workspace')
+            : {
+                workspaceId: 'local:workspace',
+                contentMode: 'plaintext',
+                contentModeVersion: 1,
+              }
+        )
+      );
+      expect(await outcome).toBe(answer === 'plaintext' ? 'admitted' : 'cancelled');
+      if (answer === 'plaintext') {
+        expect(store.get(runtimeAtom)).toBe(prepared);
+        expect(prepared.disposed).toBe(false);
+        // An authenticated immutable verdict remains valid through temporary
+        // authentication hydration, just like a retained offline proof.
+        await act(async () => environment.session.set({ status: 'loading' }));
+        await expect(gate(new AbortController().signal)).resolves.toBeUndefined();
+        expect(store.get(runtimeAtom)).toBe(prepared);
+      }
+    }
+  );
+
+  it('opens local data but refuses outbound admission when cloud classification is unavailable', async () => {
+    ordinaryCloud();
+    environment.e2eeWorkspaces = undefined;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+    await expect(gate(new AbortController().signal)).rejects.toThrow(
+      'e2ee_workspace_mode_unavailable'
+    );
+    expect(prepared.metadata.get('session')).toBe('already prepared');
+  });
+
   it.each(['unknown mode', 'other workspace'] as const)(
     'retires a provisional runtime and fails closed when background verification returns %s',
     async (answer) => {
@@ -894,6 +948,50 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   );
 
+  it.each(['offline', 'access-restored'] as const)(
+    'independent review: a recovered SEC1 mode proof must release the C1 content gate (%s)',
+    async (failureKind) => {
+      ordinaryCloud();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const describeWorkspace = environment.e2eeWorkspaces!.describe;
+      const failure =
+        failureKind === 'offline'
+          ? new Error('Offline')
+          : new ConvexError({ code: 'workspace_access_denied' });
+      environment.e2eeWorkspaces!.describe = async () => {
+        throw failure;
+      };
+      await render();
+      const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+      await expect(gate(new AbortController().signal)).rejects.toBe(failure);
+      environment.e2eeWorkspaces!.describe = describeWorkspace;
+      environment.workspaces.set({
+        status: 'ready',
+        activeWorkspaceId: 'local:workspace',
+        workspaces: [{ id: 'local:workspace', slug: 'local', name: 'Local' }],
+      });
+      const uninstall = installAttachmentWorkspaceAccess({
+        identity: { session: environment.session, signOut: async () => {} },
+        workspaces: { state: environment.workspaces, setActive: async () => {} },
+        e2eeWorkspaces: environment.e2eeWorkspaces,
+      });
+      try {
+        await act(async () => {
+          await authorizePlaintextAttachmentUpload('local:workspace', undefined, 'local:user');
+          window.dispatchEvent(new Event('online'));
+        });
+        expect(
+          readWorkspaceModeProof(localStorage, 'local:user', 'local:workspace', 'local')
+        ).toMatchObject({ contentMode: 'plaintext' });
+        expect(store.get(runtimeAtom)).toBe(prepared);
+        expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+        await expect(gate(new AbortController().signal)).resolves.toBeUndefined();
+      } finally {
+        uninstall();
+      }
+    }
+  );
+
   it('keeps an ordinary runtime when background verification fails without describing a mode', async () => {
     ordinaryCloud();
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -943,6 +1041,75 @@ describe('RuntimeProvider warm workspace preparation', () => {
       remove();
     }
   });
+
+  it.each(['new proof', 'send retry', 'online'] as const)(
+    'recovers content admission after access is restored through %s without rebuilding the Repo',
+    async (recovery) => {
+      ordinaryCloud();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const describeWorkspace = environment.e2eeWorkspaces!.describe;
+      const failure = new ConvexError({ code: 'workspace_access_denied' });
+      environment.e2eeWorkspaces!.describe = async () => {
+        throw failure;
+      };
+      await render();
+      const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+      await expect(gate(new AbortController().signal)).rejects.toBe(failure);
+      environment.e2eeWorkspaces!.describe = describeWorkspace;
+      if (recovery === 'new proof') {
+        retainWorkspaceModeProof(localStorage, 'local:user', 'local', {
+          workspaceId: 'local:workspace',
+          contentMode: 'plaintext',
+          contentModeVersion: 1,
+        });
+      } else if (recovery === 'online') {
+        await act(async () => window.dispatchEvent(new Event('online')));
+      }
+      await act(async () => {
+        await expect(gate(new AbortController().signal)).resolves.toBeUndefined();
+      });
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      expect(prepared.disposed).toBe(false);
+      expect(prepared.metadata.get('session')).toBe('already prepared');
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'plaintext',
+      });
+    }
+  );
+
+  it.each(['other workspace', 'other account', 'encrypted'] as const)(
+    'does not recover a failed content gate from %s evidence',
+    async (kind) => {
+      ordinaryCloud();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const failure = new ConvexError({ code: 'workspace_access_denied' });
+      environment.e2eeWorkspaces!.describe = async () => {
+        throw failure;
+      };
+      await render();
+      const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+      await expect(gate(new AbortController().signal)).rejects.toBe(failure);
+      retainWorkspaceModeProof(
+        localStorage,
+        kind === 'other account' ? 'other-account' : 'local:user',
+        'local',
+        kind === 'encrypted'
+          ? encryptedDescriptor('local:workspace')
+          : {
+              workspaceId: kind === 'other workspace' ? 'other-workspace' : 'local:workspace',
+              contentMode: 'plaintext',
+              contentModeVersion: 1,
+            }
+      );
+      await act(async () => {
+        await expect(gate(new AbortController().signal)).rejects.toThrow();
+      });
+      expect(store.get(runtimeAtom)).toBe(kind === 'encrypted' ? null : prepared);
+      expect(prepared.metadata.get('session')).toBe('already prepared');
+      if (kind !== 'encrypted') expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+    }
+  );
 
   it('retries a mode read rejected while backend authentication catches up', async () => {
     ordinaryCloud();

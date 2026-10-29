@@ -15,7 +15,7 @@ import { makeDesktopKeyMaintenance } from './e2ee-key-maintenance.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
 import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
-import { makeDesktopMemberApprovals } from './e2ee-member-join.mjs'
+import { makeDesktopMemberApprovals, verifyMemberHistory } from './e2ee-member-join.mjs'
 import { makeDesktopLocalPairing } from './e2ee-local-pairing.mjs'
 import type { LocalE2eePrepareResponse } from '@lody/shared/e2ee-local-pairing'
 import { mkdir, unlink } from 'node:fs/promises'
@@ -38,6 +38,7 @@ import {
   decodeRecord,
   exportVerifiedState,
   hashRecordBytes,
+  ledgerStateDigest,
   prepareLedgerCommand,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
@@ -89,6 +90,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'closed'
     | 'invalid-input'
     | 'corrupt'
+    | 'snapshot-history-required'
     | 'local-evidence-conflict'
     | 'storage'
     | 'rotation_candidate_unavailable'
@@ -226,7 +228,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         memberApprovals: ReturnType<typeof makeDesktopMemberApprovals>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
-        observe: (checkpoint: ObservedCheckpoint) => Effect.Effect<void, unknown>
+        observe: (
+          checkpoint: ObservedCheckpoint,
+          proof?: readonly E2eeWorkspaceHistoryPage[]
+        ) => Effect.Effect<void, unknown>
         stop: () => void
         isClosing: () => boolean
         close: Effect.Effect<void, DesktopE2eeRuntimeError>
@@ -250,7 +255,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
     >()
     const openWorkspace = Effect.fnUntraced(function* (
       workspaceId: string,
-      observed?: ObservedCheckpoint
+      observed?: ObservedCheckpoint,
+      proof?: readonly E2eeWorkspaceHistoryPage[]
     ) {
       if (typeof workspaceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId))
         return yield* fail('invalid-input')
@@ -258,13 +264,29 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       if (openedEntry) {
         if (openedEntry.isClosing())
           return yield* fail(openedEntry.restartRequired() ? 'restart-required' : 'closed')
-        if (observed) yield* openedEntry.observe(observed)
+        if (observed) yield* openedEntry.observe(observed, proof)
         return openedEntry
       }
       if (yield* options.bootstrap.hasRemovedWorkspace(workspaceId))
         return yield* fail('member_removed')
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
+      const readObservation = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {
+        if (
+          !expected ||
+          expected.genesisHash !== creation.genesisHash ||
+          !Number.isSafeInteger(expected.length) ||
+          expected.length < 1 ||
+          !/^[0-9a-f]{64}$/.test(expected.headHash)
+        )
+          return yield* fail('local-evidence-conflict')
+        const point = {
+          head: Result.getOrThrow(Bytes.recordHash(unhex(expected.headHash))),
+          length: expected.length
+        }
+        return point
+      })
+      const openingObservation = observed ? yield* readObservation(observed) : undefined
       const invitation = creation.invitation
       const initialOrigin: Parameters<typeof LedgerFeed.layer>[0]['origin'] = invitation
         ? { kind: 'snapshot', snapshot: invitation.snapshot }
@@ -361,8 +383,18 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         )
         const pins = Context.get(storeContext, LedgerPinStore)
         const installedStore = Context.get(storeContext, InstalledKeyStore)
-        const pin = yield* pins.read().pipe(Effect.mapError(pinFailure))
+        let pin = yield* pins.read().pipe(Effect.mapError(pinFailure))
         let minimumPin = pin
+        // Reject contradictions already known locally before requesting any prefix proof.
+        if (
+          openingObservation &&
+          [pin, initialPoint].some(
+            (known) =>
+              known?.length === openingObservation.length &&
+              !known.head.equals(openingObservation.head)
+          )
+        )
+          return yield* fail('local-evidence-conflict')
         const rows = () =>
           db
             .prepare('SELECT position,record,locator FROM records ORDER BY position')
@@ -374,6 +406,107 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const endpoint = suffix.length
           ? { head: hashRecordBytes(suffix.at(-1)!.record), length: suffix.at(-1)!.position + 1 }
           : initialPoint
+        // A compact invitation cannot prove any checkpoint before its origin. Fetching
+        // history belongs to IPC outside the account lock; authenticate and retain it here.
+        let prefixProof: import('@lody/e2ee-core/protocol').LedgerView | undefined
+        const proveSnapshotPrefix = Effect.fnUntraced(function* (
+          point: { head: ReturnType<typeof hashRecordBytes>; length: number },
+          pages?: readonly E2eeWorkspaceHistoryPage[],
+          additionalPoint?: typeof point
+        ) {
+          if (!invitation) return yield* fail('local-evidence-conflict')
+          if (!prefixProof) {
+            let prefix = (yield* sql(rows)).filter((row) => row.position < initialCount)
+            if (prefix.length !== initialCount || prefix.some((row, i) => row.position !== i)) {
+              if (!pages) return yield* fail('snapshot-history-required')
+              // Validate the entire paginated response, including any newer suffix.
+              yield* verifyMemberHistory(
+                {
+                  workspaceId,
+                  genesisHash: creation.genesisHash,
+                  genesisRecordHex: hex(creation.record)
+                },
+                pages
+              )
+              prefix = pages
+                .flatMap((page) =>
+                  page.recordsHex.map((record, i) => ({
+                    position: page.startIndex + i,
+                    record: unhex(record),
+                    locator: null
+                  }))
+                )
+                .slice(0, initialCount)
+            }
+            const replayed = yield* verifyLedgerEffect({
+              anchor: genesis,
+              records: prefix.map((row) => row.record),
+              checkpoint: initialPoint
+            }).pipe(
+              Effect.mapError((error) =>
+                error.code === 'checkpoint-mismatch' ? fail('local-evidence-conflict') : error
+              )
+            )
+            if (
+              !Result.getOrThrow(ledgerStateDigest(replayed)).equals(
+                Result.getOrThrow(ledgerStateDigest(invitation.view))
+              )
+            )
+              return yield* fail('local-evidence-conflict')
+            if (!Result.getOrThrow(hasVerifiedCheckpoint(replayed, point)))
+              return yield* fail('local-evidence-conflict')
+            // Validate the caller's observation as well as the original native pin before
+            // committing anything. A newer observation beyond local history remains a
+            // pending restriction, as in observe(); it grants no current authority.
+            if (additionalPoint && additionalPoint.length <= endpoint.length) {
+              const evidence =
+                additionalPoint.length <= replayed.length
+                  ? replayed
+                  : yield* extendLedgerEffect(
+                      replayed,
+                      suffix.map((row) => row.record),
+                      endpoint
+                    )
+              if (!Result.getOrThrow(hasVerifiedCheckpoint(evidence, additionalPoint)))
+                return yield* fail('local-evidence-conflict')
+            }
+            // No proof or conflicting evidence may mutate originals or the durable pin.
+            yield* sql(() => {
+              db.exec('BEGIN IMMEDIATE')
+              try {
+                for (const row of prefix) {
+                  const prior = db
+                    .prepare('SELECT record FROM records WHERE position=?')
+                    .get(row.position)
+                  if (
+                    prior &&
+                    (!(prior.record instanceof Uint8Array) ||
+                      !Buffer.from(prior.record).equals(row.record))
+                  )
+                    throw fail('local-evidence-conflict')
+                  db.prepare('INSERT OR IGNORE INTO records(position,record) VALUES(?,?)').run(
+                    row.position,
+                    row.record
+                  )
+                }
+                db.exec('COMMIT')
+              } catch (error) {
+                db.exec('ROLLBACK')
+                throw error
+              }
+            })
+            prefixProof = replayed
+          }
+          if (!Result.getOrThrow(hasVerifiedCheckpoint(prefixProof, point)))
+            return yield* fail('local-evidence-conflict')
+          return undefined
+        })
+        if (pin && pin.length < initialCount) {
+          yield* proveSnapshotPrefix(pin, proof, openingObservation)
+          // Originals are durable before the guard advances across the proved prefix.
+          yield* pins.write(initialPoint)
+          pin = minimumPin = initialPoint
+        }
         const replayOriginals = (): Effect.Effect<
           import('@lody/e2ee-core/protocol').LedgerView,
           unknown
@@ -577,24 +710,20 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             })
           }
         }
-        const observe = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {
-          if (
-            !expected ||
-            expected.genesisHash !== creation.genesisHash ||
-            !Number.isSafeInteger(expected.length) ||
-            expected.length < 1 ||
-            !/^[0-9a-f]{64}$/.test(expected.headHash)
-          )
-            return yield* fail('local-evidence-conflict')
-          const point = {
-            head: Result.getOrThrow(Bytes.recordHash(unhex(expected.headHash))),
-            length: expected.length
-          }
+        const observe = Effect.fnUntraced(function* (
+          expected: ObservedCheckpoint,
+          pages?: readonly E2eeWorkspaceHistoryPage[]
+        ) {
+          const point = yield* readObservation(expected)
           if (minimumPin?.length === point.length && !minimumPin.head.equals(point.head))
             return yield* fail('local-evidence-conflict')
           const current = (yield* feed.current()).view
           if (current.length >= point.length) {
             let contains = Result.getOrThrow(hasVerifiedCheckpoint(current, point))
+            if (!contains && invitation && point.length < initialCount) {
+              yield* proveSnapshotPrefix(point, pages)
+              contains = true
+            }
             if (!contains) {
               const proofRecords = yield* sql(rows)
               const replayed = yield* invitation
@@ -616,12 +745,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
           // This is a prior local verifier's restriction, never a source of permission.
           if (!minimumPin || minimumPin.length < point.length) {
-            yield* pins.write(point)
-            minimumPin = point
+            const nextPin = invitation && point.length < initialCount ? initialPoint : point
+            yield* pins.write(nextPin)
+            minimumPin = nextPin
           }
           return undefined
         })
-        if (observed) yield* observe(observed)
+        if (observed) yield* observe(observed, proof)
         const pending = (view: { length: number }) =>
           Boolean(minimumPin && view.length < minimumPin.length)
         const verifiedLayer = VerifiedLedger.layer.pipe(
@@ -1555,8 +1685,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         withPairing(workspaceId, (pairing) => pairing.approve(session)),
       confirmLocalPairing: (workspaceId: string, session: string) =>
         withPairing(workspaceId, (pairing) => pairing.confirmed(session)),
-      open: (workspaceId: string, observed?: ObservedCheckpoint) =>
-        run(Effect.flatMap(openWorkspace(workspaceId, observed), (entry) => entry.status())),
+      open: (
+        workspaceId: string,
+        observed?: ObservedCheckpoint,
+        proof?: readonly E2eeWorkspaceHistoryPage[]
+      ) =>
+        run(Effect.flatMap(openWorkspace(workspaceId, observed, proof), (entry) => entry.status())),
       status: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.status())),
       // The lookup is serialized locally; mailbox/network work deliberately

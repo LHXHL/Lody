@@ -4110,6 +4110,8 @@ export const SessionChatInterface = memo(
 
         const turnCount = conversationView.turnCount;
         try {
+          if (!runtime) throw new Error('Workspace runtime unavailable');
+          await runtime.waitForContentAdmission?.();
           const history = conversationCopyRange(await conversationView.readAll(), throughMessageId);
           const last = history.at(-1);
           const { markdown, stats } = buildConversationMarkdown({
@@ -4128,6 +4130,7 @@ export const SessionChatInterface = memo(
                   )
                 : undefined,
           });
+          await runtime.waitForContentAdmission?.();
           await navigator.clipboard.writeText(markdown);
           captureSessionEvent('session/history_copy_succeeded', {
             history_count: turnCount,
@@ -4164,6 +4167,7 @@ export const SessionChatInterface = memo(
         workspaceId,
         session.title,
         conversationView,
+        runtime,
         postHog,
         t,
       ]
@@ -5997,6 +6001,8 @@ export const SessionChatInterface = memo(
         copyConversationHistory: handleCopyConversationHistory,
         getShareImageData: async () => {
           if (!conversationView?.turnCount) return null;
+          if (!runtime) throw new Error('Workspace runtime unavailable');
+          await runtime.waitForContentAdmission?.();
           return {
             messages: collectConversationMessages(await conversationView.readAll()),
             agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
@@ -6019,6 +6025,7 @@ export const SessionChatInterface = memo(
         session.cliType,
         sessionAgentConfig?.name,
         conversationView,
+        runtime,
       ]
     );
 

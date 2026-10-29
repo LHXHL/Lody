@@ -178,6 +178,72 @@ describe('static publication client lifecycle', () => {
     container.remove();
     vi.unstubAllEnvs();
   });
+
+  it.each(['plaintext', 'encrypted', 'lookup failure', 'account switch'] as const)(
+    'keeps the publication body off the network until unknown mode resolves as %s',
+    async (answer) => {
+      const mode = Promise.withResolvers<void>();
+      const waiting = Promise.withResolvers<void>();
+      const history = [
+        {
+          id: 'turn',
+          role: 'user',
+          items: [{ type: 'text', text: 'C1 private publication sentinel' }],
+        },
+      ];
+      const outgoing: unknown[] = [];
+      const actual = await vi.importActual<typeof import('../src/lib/session-share-publisher')>(
+        '../src/lib/session-share-publisher'
+      );
+      cloud.capture.mockImplementation(actual.captureSessionShare);
+      cloud.mutation.mockImplementation(async (name: string, args: unknown) => {
+        outgoing.push({ name, args });
+        return name === 'sessionSharing:beginDeployment'
+          ? { ...entry, status: 'draft', revision: 0, deploymentId: 'deployment' }
+          : entry;
+      });
+      store.set(activeWorkspaceRuntimeAtom, {
+        workspaceId: 'workspace',
+        contentMode: 'plaintext',
+        waitForContentAdmission: () => {
+          waiting.resolve();
+          return mode.promise;
+        },
+        prepareSessionTarget: async () => {},
+        acquireSessionStore: async () => ({
+          sessionId: 'root',
+          firstSynced: Promise.resolve(),
+          acquireSync: () => () => {},
+          sessionData: { history: { readAll: async () => history } },
+        }),
+        releaseSessionStoreRef: () => {},
+      } as never);
+      await render();
+      let publishing!: Promise<void>;
+      await act(async () => {
+        publishing = control.onPublish();
+        await waiting.promise;
+      });
+      expect(outgoing).toEqual([]);
+      await act(async () => {
+        if (answer === 'encrypted' || answer === 'lookup failure')
+          mode.reject(new Error('Workspace content unavailable'));
+        else {
+          if (answer === 'account switch') store.set(userAtom, { id: 'bob' });
+          mode.resolve();
+        }
+        await publishing;
+      });
+      expect(history[0]!.items[0]!.text).toBe('C1 private publication sentinel');
+      if (answer === 'plaintext') {
+        expect(control.result?.url).toContain('https://share.test/s/share');
+        expect(outgoing.length).toBeGreaterThan(0);
+      } else {
+        expect(outgoing).toEqual([]);
+        expect(control.result).toBeNull();
+      }
+    }
+  );
   it('changing the server selection during consent must not disclose an unselected conversation', async () => {
     showEditor = true;
     const reads: string[] = [];

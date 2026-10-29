@@ -38,6 +38,9 @@ export async function acceptSessionUserTurn(
   attachments?: SessionAttachmentDraft[],
   onAccepted?: () => void
 ): Promise<'written' | 'pending'> {
+  // Do not consume a draft into a provisional plaintext namespace that may be
+  // retired when the workspace is classified as encrypted.
+  await runtime.waitForContentAdmission?.();
   if (
     attachments?.some(
       (attachment) =>

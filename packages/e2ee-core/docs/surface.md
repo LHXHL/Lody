@@ -41,6 +41,7 @@ repository's tests and the Lab, with no compatibility promise.
 | Recovery      | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
 | Client custody | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore` |
+| Pairing originals | `ClientPairingPurpose`, `ClientPairingKey`, `ClientPairingOriginal`, `ClientPairingOriginalStore` |
 
 ## `@lody/e2ee-core/protocol` — pure protocol
 
@@ -133,3 +134,11 @@ recovery closes and archives the complete identity before opening independent
 custody; ordinary retry grants no replacement authority.
 
 `NodeE2eeCustody.forgetDevice(genesis, signingPublicKey, kind)` is reserved for host-authenticated terminal member removal after workspace users drain. It removes only the matching retained device/credential, spares a different identity and keeps shared KEK custody. The host owns epoch/content-store deletion and cross-process exclusion.
+
+## `@lody/e2ee-core/adapters/browser-crypto`
+
+`importBrowserDevice`, `BrowserDevice`.
+
+## `@lody/e2ee-core/adapters/indexeddb`
+
+`indexedDbClientStores`, `IndexedDbStoreOptions`.

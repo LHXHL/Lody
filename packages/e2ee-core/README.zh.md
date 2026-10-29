@@ -9,8 +9,8 @@
 ## 可用范围
 
 服务架构已经支持复用，但当前仍是仓库内的私有包（`private: true`、版本 `0.0.0`），
-尚未发布为独立 SDK，生产 E2EE 组合也未启用。已有 Node SQLite 与 Loro Streams
-适配器；其他运行时需要实现自己的存储和平台适配器。后端端口与 `/host` 规定其他
+尚未发布为独立 SDK，生产 E2EE 组合也未启用。已有 Node SQLite、Loro Streams 与可选的浏览器账本/原件 IndexedDB
+适配器；其他存储和平台保护仍由宿主提供。后端端口与 `/host` 规定其他
 后端需要实现什么，并不负责部署服务器。
 
 protocol 入口还提供机器所有者签名的完整共享策略 codec、资源绑定、版本验证与纯执行
@@ -57,6 +57,7 @@ Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.m
 | `@lody/e2ee-core/services` | 需要你实现或提供的端口、端口错误 | 公开 |
 | `@lody/e2ee-core/protocol` | 纯协议：字节、CBOR、账本验证、信封、内容格式 | 公开 |
 | `@lody/e2ee-core/host` | 后端必须执行的规则、暂存线上格式（不依赖 Node API） | 公开 |
+| `@lody/e2ee-core/adapters/indexeddb` | 绑定账号/工作区/genesis 的账本与原件存储；不负责密钥保管 | 公开 |
 | `@lody/e2ee-core/adapters/node-sqlite` | 每个本地存储的 SQLite 实现、参考邮箱后端 | 公开 |
 | `@lody/e2ee-core/adapters/loro-streams` | 基于 Loro / Durable Streams 控制流的 `LedgerLog` / `LedgerFeedSource` | 公开 |
 | `@lody/e2ee-core/cloudflare` | 在 Cloudflare Worker 中导入一次，使严格 Ed25519 在 WebAssembly 中运行（workerd 禁止运行时编译）；其他运行时无需导入 | 公开 |
@@ -110,6 +111,7 @@ src/
   services/                "/services" 端口
   protocol/                "/protocol" 纯协议汇总
   host/                    "/host"     后端合同
+  adapters/indexeddb/      浏览器账本/pin/提交与配对原件
   adapters/node-sqlite/    SQLite 存储、参考邮箱后端
   adapters/loro-streams/   Streams 账本日志与 feed 源
   internal/                实现：foundation、crypto、ledger、keys、submission
@@ -168,3 +170,10 @@ Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可�
 [node-custody](docs/surface.zh.md) 保管实现，并分别提供经过核对的系统包装器。
 
 [冻结前格式审查](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.zh.md)记录账本格式的未决事项和仅支持当前版本的格式盘点。
+
+浏览器曲线能力由 `@lody/e2ee-core/adapters/browser-crypto` 提供：
+`importBrowserDevice` 导入独立的原始 Ed25519/X25519 私钥，返回由 Scope 持有的
+签名器和不透明 X25519 句柄。它不提供持久保护、设备批准或运行时启用。
+
+IndexedDB 适配器保存账本起点/后缀、pin、提交结果及配对/审批/claim 原件；
+不提供密钥 journal、custody、审批验证或网络编排。

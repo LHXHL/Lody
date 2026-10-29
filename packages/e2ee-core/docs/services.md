@@ -34,15 +34,16 @@ an older ledger.
 | [`EpochPublicationSource`](#epochpublicationsource) | Application | lookup of the current epoch's publication record | `KeyDistributor` |
 | [`LedgerSync`](#ledgersync) | Application | your feed sync (`LedgerFeedSource` pages → `LedgerFeed.accept`, checkpoint chosen independently) | `WorkspaceControl`, `E2eeWorkspace` |
 | `RecoveryVaultLocalStore` | Local storage | a local key/value store with compare-and-swap | `RecoveryVaults` |
-| `LedgerPinStore` | Local storage | `sqliteLedgerPinStore` | `VerifiedLedger` |
-| `LedgerFeedStore` | Local storage | `sqliteLedgerFeedStore` | `LedgerFeed` |
+| `LedgerPinStore` | Local storage | `sqliteLedgerPinStore` or `indexedDbClientStores` | `VerifiedLedger` |
+| `LedgerFeedStore` | Local storage | `sqliteLedgerFeedStore` or `indexedDbClientStores` | `LedgerFeed` |
 | `InstalledKeyStore` | Local storage | `sqliteInstalledKeyStore` | `InstalledEpochKeys` |
 | `ReceiveJournal` | Local storage | `sqliteReceiveJournal` | `KeyReceiver` |
 | `RepairJournal` | Local storage | `sqliteRepairJournal` | `KeyRepair` |
 | `DistributionJournal` | Local storage | `sqliteDistributionJournal` | `KeyDistributor` |
 | `DeliveryOutbox` | Local storage | `sqliteDeliveryOutbox` | `KeyDistributor` |
 | `EpochCandidateStore` | Local storage | `sqliteEpochCandidateStore` | `EpochPublisher` |
-| `SubmissionJournal` | Local storage | `sqliteSubmissionJournal` | `LedgerSubmission` |
+| `SubmissionJournal` | Local storage | `sqliteSubmissionJournal` or `indexedDbClientStores` | `LedgerSubmission` |
+| `ClientPairingOriginalStore` | Local storage | `indexedDbClientStores` | client host |
 
 `sqliteLocalStores({ directory, mode })` provides every local storage port at
 once, one file per store. Use it unless your platform has no Node SQLite.
@@ -114,7 +115,16 @@ a private recovery key. Wire schemas are in `@lody/e2ee-core/host`; see the
 valid Ed25519 signature; the library verifies every signature it receives
 before use, so a wrong signer fails instead of producing bad records. Private
 keys stay in your custody. `nativeDeviceSigner(publicKey, cryptoKey)` builds a
-signer from a WebCrypto Ed25519 key.
+signer from a WebCrypto Ed25519 key. For platforms without native curves,
+`importBrowserDevice` from `@lody/e2ee-core/adapters/browser-crypto` imports
+independent raw 32-byte Ed25519 seed/X25519 secret into a Scope-owned signer,
+`enc` and opaque `encryption` pair. Provide the returned device as `signer` and
+its `encryption` as `encryptionKeyPair`. Compare its derived public identities
+with the retained, approved binding first. The caller must wipe input buffers.
+The pair works only with core HPKE in the same isolate; it cannot be exported,
+structured-cloned or passed to native WebCrypto. Close rejects new use, drains
+admitted HPKE and wipes owned private bytes; Scope release closes automatically.
+This crypto adapter provides neither durable protection nor admission.
 
 ### KeyProtector / CandidateProtector
 
@@ -169,8 +179,8 @@ scoped hard reset or authenticated terminal removal after drain.
 
 The existing identity, installed/candidate protectors, ledger/submission stores and
 key/snapshot journals keep their responsibilities. This contract adds no key-export,
-file-access or verifier hook. Browser crypto/IDB adapters and portable host/runtime
-consumers require separate implementation and platform acceptance. Existing desktop
+file-access or verifier hook. The opt-in browser crypto/IDB adapters do not enable a portable host/runtime;
+custody and consumer composition still require implementation and platform acceptance. Existing desktop
 and CLI APIs remain unchanged.
 
 Shared local-wrapping v1 bytes and all CLIENT_KEY_PURPOSES are pinned by
@@ -227,8 +237,7 @@ each port's JSDoc):
 - Journals keep originals and results until the application acknowledges
   them. Nothing is deleted automatically.
 
-To store elsewhere (IndexedDB, a mobile database, …), implement the ports
-against that storage with the same atomicity. The SQLite adapters in
+For other stores, implement the ports with the same atomicity. The SQLite adapters in
 `src/adapters/node-sqlite` are the reference.
 
 ## Internal pieces you can swap
@@ -250,3 +259,48 @@ Lab.
 `LedgerFeedStore.rebase` CAS-checks the entire expected tail, replaces the origin
 and its count, removes covered records, and writes/read-checks the new tail in
 one transaction. A stale tail returns conflict without mutation.
+
+## Browser ledger and original stores
+
+`indexedDbClientStores` from `@lody/e2ee-core/adapters/indexeddb` provides
+`LedgerPinStore`, `LedgerFeedStore`, `SubmissionJournal` and
+`ClientPairingOriginalStore`. Supply `WorkspaceScope` plus a stable `databaseName`,
+`accountId`, `workspaceId` and explicit mode. Only provisioning uses
+`create-or-open`; a returning installation uses `open-existing`, whose absence
+blocks. The database name remains stable across device replacement and logout,
+so neither a new device nor ordinary cache cleanup can discard the rollback pin.
+
+The local schema is version 1, independent of ledger v1. One captured account,
+workspace and pinned genesis bind every transaction. Native IDB requests stay
+inside short synchronous callbacks: no crypto or network awaits. Writes read
+back their rows and binding, request strict durability (a browser hint), and
+report success only after `complete`. Abort/quota failures roll back both records
+and cursor. Before rebase deletes covered rows, it scans the entire suffix in the
+same readwrite transaction, requiring consecutive integer keys, bounded byte-array
+records and exact record/byte totals. Extra, missing or malformed rows abort without
+changing the origin, cursor or any original. Scope close rejects new operations
+and waits for admitted transactions;
+errors, unsupported storage, missing sentinels and unknown schema never select an
+in-memory fallback or reset existing state.
+
+Pin reads capture an owner-local CAS revision. Use one sequential `VerifiedLedger`
+per Layer; independent tabs have distinct revision tokens. A conflict requires a
+fresh read and the workflow's normal continuation check. Feed bytes remain
+untrusted: the host replays suffixes or requalifies its own retained export against
+an independently retained endpoint/digest. Stored rows never create verified views.
+
+Pairing slots additionally bind local device, installation, 16-byte session and
+request/approval/claim purpose. They retain the first original plus its first
+opaque receipt; exact retries are no-ops, changed bytes or revisions conflict.
+The host protects any secret material before storage and verifies signatures,
+current admission and receipt meaning on resume. The store grants no approval and
+has no network or deletion method. Pages are bounded to 64 entries and 32 MiB;
+logout and installation replacement retain old exchanges. Receive/key/outbox,
+repair and snapshot journals belong to the separate custody layer.
+
+`test:browser-idb` bundles without external imports and exercises Chromium/WebKit
+persistent profiles, restarts, competing tabs, unknown results, native transaction
+faults and close. This is browser-engine evidence; strict durability is only a hint.
+WebKit tests do not replace iOS 16.4 real-device or power-loss acceptance. There is no
+guarantee against user/browser eviction; loss of persistent identity protection
+must be handled by the host under the approved custody contract.

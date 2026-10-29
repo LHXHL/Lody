@@ -35,6 +35,7 @@
 | 恢复     | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
 | 客户端保管 | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore` |
+| 配对原件 | `ClientPairingPurpose`, `ClientPairingKey`, `ClientPairingOriginal`, `ClientPairingOriginalStore` |
 
 ## `@lody/e2ee-core/protocol` — 纯协议
 
@@ -121,3 +122,11 @@ genesis、公钥 AAD 完全匹配的当前 v1 原件才能重开。属于其他�
 宿主显式恢复须先关闭并整体归档旧身份，再打开独立保管；普通重试不授予替换权限。
 
 `NodeE2eeCustody.forgetDevice(genesis, signingPublicKey, kind)` 仅供宿主确认整成员移除、等待工作区使用者结束后调用。它只删除匹配的设备/凭据，避开不同身份并保留共用 KEK；epoch/内容存储删除和跨进程互斥由宿主负责。
+
+## `@lody/e2ee-core/adapters/browser-crypto`
+
+`importBrowserDevice`, `BrowserDevice`.
+
+## `@lody/e2ee-core/adapters/indexeddb`
+
+`indexedDbClientStores`, `IndexedDbStoreOptions`.
