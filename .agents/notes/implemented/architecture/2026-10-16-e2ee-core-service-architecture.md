@@ -229,3 +229,13 @@ without moving remote policy or network waits into custody ownership.
 Browser engines and desktop regressions exercise
 these contracts; minimum-OS devices, native plugins and power-loss durability
 remain separate acceptance.
+
+
+A4's current `host.close()` and `session.close()` wait without a deadline if an
+injected native call never settles. This accepted A4 limitation must be resolved
+before enabling mobile native custody ([tracking issue #2075](https://github.com/LodyAI/Lody/issues/2075)).
+The follow-up bounds the caller's wait and reports incomplete close explicitly;
+a controlled owner retains unsettled operations, physical locks and borrowed
+buffers until actual settlement or confirmed termination. Timeout cannot release
+those resources, report successful close, or permit an overlapping successor.
+The shared runtime bridge owns this follow-up or consumes its prerequisite fix.

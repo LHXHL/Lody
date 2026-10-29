@@ -122,3 +122,11 @@ hex、installation ID、原 genesis record hex、endorser、membership。排除 
 仅有限的本地获取不可取消，不把远端策略或网络等待移入 custody 所有权。
 浏览器引擎与桌面回归验证这些合同；最低 OS 真机、
 原生插件和断电耐久仍需独立验收。
+
+
+A4 当前的 `host.close()` 和 `session.close()` 在注入的原生调用永不结算时没有等待上限。
+此项已接受的 A4 限制须在启用移动端原生 custody 前补齐
+（[跟踪 Issue #2075](https://github.com/LodyAI/Lody/issues/2075)）。后续限制调用方的等待，
+超时明确报告关闭未完成；受控 owner 持有未结算操作、物理锁与借用缓冲，直至实际结算或
+确认原生终止。超时不得提前释放这些资源、报告关闭成功或放行重叠的新 owner。
+共享 runtime bridge 负责此项后续要求，或先采用其前置修复。
