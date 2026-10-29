@@ -654,6 +654,9 @@ importers:
       '@lody/configs':
         specifier: workspace:*
         version: link:../../packages/configs
+      '@lody/e2ee-client':
+        specifier: workspace:*
+        version: link:../../packages/e2ee-client
       '@lody/e2ee-core':
         specifier: workspace:*
         version: link:../../packages/e2ee-core
@@ -1597,6 +1600,46 @@ importers:
         specifier: '>=4'
         version: 4.3.0
 
+  packages/e2ee-client:
+    dependencies:
+      '@lody/cloud-api':
+        specifier: workspace:*
+        version: link:../cloud-api
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
+      '@lody/loro-streams-rpc':
+        specifier: workspace:*
+        version: link:../loro-streams-rpc
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@playwright/test':
+        specifier: 1.58.2
+        version: 1.58.2
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      oxfmt:
+        specifier: ^0.65.0
+        version: 0.65.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
+
   packages/e2ee-core:
     dependencies:
       '@hpke/chacha20poly1305':
@@ -1765,6 +1808,9 @@ importers:
       '@loro-dev/streams-client':
         specifier: 'catalog:'
         version: 0.12.1(effect@4.0.2)
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
       effect:
         specifier: 'catalog:'
         version: 4.0.2
@@ -1778,6 +1824,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.10.12
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

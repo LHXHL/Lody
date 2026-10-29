@@ -2,14 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSessionTurnInputConfig } from '../../shared/src/session-input';
-import { Effect } from 'effect';
+import { Deferred, Effect } from 'effect';
 import {
   decodeE2eeRpcResponseBody,
   encodeE2eeRpcResponseBody,
   encodeE2eeRpcRequestBody,
 } from '../src/e2ee-wire';
 import { e2eeRpcResource } from '../src/e2ee-resource';
-import { E2eeRpcOriginals, e2eeRpcDigest } from '../src/e2ee-native';
+import { makeE2eeRpcNative, E2eeRpcOriginals, e2eeRpcDigest } from '../src/e2ee-native';
 import { encryptedRpcFixture } from './fixtures/e2ee-native-fixture';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { Bytes } from '@lody/e2ee-core/protocol';
@@ -27,6 +27,115 @@ afterEach(() => {
 });
 
 describe('trusted-host encrypted dispatch originals', () => {
+  it.each([
+    'dispatch-request',
+    'feature-request',
+    'dispatch-response',
+    'feature-response',
+  ] as const)(
+    'wipes the returned %s plaintext when cancellation precedes caller registration',
+    async (kind) => {
+      const f = fixture();
+      const entered = Effect.runSync(Deferred.make<void>()),
+        release = Effect.runSync(Deferred.make<void>());
+      let plaintext: Uint8Array | undefined;
+      const response = kind.endsWith('response'),
+        who = response ? 'owner' : 'phone';
+      const pause = <A extends { plaintext: Uint8Array }, E, R>(
+        work: Effect.Effect<A, E, R>,
+        phase: 'request' | 'response'
+      ) =>
+        kind.endsWith(phase)
+          ? Effect.uninterruptible(
+              Effect.gen(function* () {
+                const opened = yield* work;
+                plaintext = opened.plaintext;
+                yield* Deferred.succeed(entered, undefined);
+                yield* Deferred.await(release);
+                return opened;
+              })
+            )
+          : work;
+      const client = makeE2eeRpcNative({
+        workspaceId: f.workspaceId,
+        requesterDevice: Buffer.from(f.ledger[who].publicKey.toBytes()).toString('hex'),
+        originals: new E2eeRpcOriginals(
+          join(f.directory, response ? 'owner.sqlite' : 'held-decrypt.sqlite')
+        ),
+        ledger: f.ledger.ledger,
+        binding: (resource) =>
+          Effect.gen(function* () {
+            const binding = yield* makeRealtimeContentBinding({
+              genesis: f.ledger.context.genesis,
+              resource,
+              signer: f.ledger[who].signer,
+              ledger: f.ledger.ledger,
+              readEpochKey: () =>
+                Effect.sync(() =>
+                  Result.getOrThrow(Bytes.epochKey(copyEpochKeyBytes(f.ledger.secret)))
+                ),
+            });
+            return {
+              ...binding,
+              openRequest: (frame) => pause(binding.openRequest(frame), 'request'),
+              openResponse: (...args) => pause(binding.openResponse(...args), 'response'),
+            };
+          }),
+      });
+      try {
+        let task: Effect.Effect<unknown, unknown>;
+        if (kind.startsWith('dispatch')) {
+          const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
+          if (response) {
+            const opened = await Effect.runPromise(
+              f.receiver.openDispatch(f.machineId, original.frameHex)
+            );
+            const frame = await Effect.runPromise(f.receiver.sealAck(f.machineId, opened, f.ack));
+            task = client.acceptResponse(f.machineId, f.input, Buffer.from(frame).toString('hex'));
+          } else task = client.openDispatch(f.machineId, original.frameHex);
+        } else {
+          const input = {
+            requestId: '57'.repeat(16),
+            request: {
+              workspaceId: f.workspaceId,
+              machineId: f.machineId,
+              method: 'machine/status' as const,
+              params: {},
+            },
+          };
+          const original = await Effect.runPromise(f.sender.prepareFeature(input));
+          if (response) {
+            const opened = await Effect.runPromise(
+              f.receiver.openFeature(f.machineId, original.frameHex)
+            );
+            if (!opened) throw new Error('missing feature request');
+            const frames = await Effect.runPromise(
+              f.receiver.sealFeatureResult(f.machineId, opened, {
+                ok: false,
+                error: 'synthetic private response',
+              })
+            );
+            task = client.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'));
+          } else task = client.openFeature(f.machineId, original.frameHex);
+        }
+        const abort = new AbortController();
+        const outcome = Effect.runPromise(task, { signal: abort.signal }).then(
+          () => false,
+          () => true
+        );
+        await Effect.runPromise(Deferred.await(entered));
+        expect(plaintext?.some((byte) => byte !== 0)).toBe(true);
+        abort.abort();
+        await Effect.runPromise(Deferred.succeed(release, undefined));
+        expect(await outcome).toBe(true);
+        expect(plaintext?.every((byte) => byte === 0)).toBe(true);
+      } finally {
+        await Effect.runPromise(Deferred.succeed(release, undefined));
+        await Effect.runPromise(client.close());
+      }
+    }
+  );
+
   it('rejects a valid old Guest-signed Pi query at the receiving host before retaining or executing it', async () => {
     const f = encryptedRpcFixture({ guest: true });
     fixtures.push(f);

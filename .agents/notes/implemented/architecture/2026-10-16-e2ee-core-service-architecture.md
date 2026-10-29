@@ -187,3 +187,55 @@ replacement. The first wrapped candidate belongs to the pending request receipt;
 that local completion is never desktop approval. Browser-engine tests cover these
 boundaries and all fixed purposes, but do not prove minimum-OS hardware or power-loss
 acceptance. The approved Spec and ledger v1 remain unchanged.
+
+## Personal-device product composition
+
+[`@lody/e2ee-client`](../../../../packages/e2ee-client/README.md) owns optional
+personal pairing/open/key/management/RPC composition outside core. Desktop
+consumes its unchanged pairing codecs, fixed full-history verifier and finite
+key-maintenance owner; native storage is an adapter, not a second protocol tree.
+The portable RPC implementation likewise has one effectful immutable store port
+and a thin SQLite compatibility wrapper. No product transport is enabled here.
+
+Receipts cannot authenticate an independently transferred endorser after cold
+reopen. The existing device-credential purpose therefore protects a current-only
+local CBOR payload `[1, credential32, pinDigest32]`. Its SHA-256 digest covers the
+JSON array of domain `lody-e2ee/client-credential-pin/v1\0` (one NUL), account,
+workspace, genesis/device hex, installation ID, original genesis record hex,
+endorser and membership. Session is excluded so a terminal retry can preserve the
+same credential/identity; pending/admitting/unknown attempts cannot change session.
+This is local protected payload, not a new wrapping, signature or ledger format.
+
+Full-history proofs may exceed the fixed single-message pairing limit. A separate
+bounded immutable paged public evidence port commits every page plus count/size/
+digests atomically; no checksum or saved approval label becomes authority. A
+replacement carries the first snapshot original rather than recursively embedding
+prior approvals. Fresh full signed history requalifies that snapshot's historical
+manager, signature and exact state before the existing origin/pin can reopen.
+Using a self-signed cache or a fresh per-device feed namespace would hide lost
+trust or rollback evidence, so neither is supported.
+
+Ledger owners precede lazy key owners. Independent key/repair failures remain
+retryable; a valid retained admitted epoch remains usable when the current key is
+absent. Replacement qualifies new approval and pins before draining healthy old
+owners, then uses the approved archive/current atomic switch. Scope close fences
+and joins operations before key/credential/store release, without deleting any
+identity or uncertain original. Secret and RPC plaintext acquisition uses
+`acquireRelease`/`acquireUseRelease` through wipe registration: joining native work
+alone can still abandon its returned buffer when cancellation reaches the caller.
+The operation Scope owns cleanup on success, failure and interruption; close joins
+that Scope before releasing custody. This masks only finite local acquisition,
+without moving remote policy or network waits into custody ownership.
+Browser engines and desktop regressions exercise
+these contracts; minimum-OS devices, native plugins and power-loss durability
+remain separate acceptance.
+
+
+A4's current `host.close()` and `session.close()` wait without a deadline if an
+injected native call never settles. This accepted A4 limitation must be resolved
+before enabling mobile native custody ([tracking issue #2075](https://github.com/LodyAI/Lody/issues/2075)).
+The follow-up bounds the caller's wait and reports incomplete close explicitly;
+a controlled owner retains unsettled operations, physical locks and borrowed
+buffers until actual settlement or confirmed termination. Timeout cannot release
+those resources, report successful close, or permit an overlapping successor.
+The shared runtime bridge owns this follow-up or consumes its prerequisite fix.

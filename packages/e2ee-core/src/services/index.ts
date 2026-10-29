@@ -112,3 +112,7 @@ export {
 } from './snapshot-publication';
 
 export { ClientIdentityOriginals } from './client-custody';
+
+export { ClientRpcOriginalStore, type ClientRpcOriginal } from './client-rpc';
+
+export { ClientApprovalEvidenceStore } from './client-approval-evidence';

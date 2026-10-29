@@ -192,7 +192,7 @@ export const openClientDatabase = (options: IndexedDbStoreOptions) =>
         done(undefined);
       });
     });
-    return { run, bound };
+    return { run, bound, close: () => owner.close };
   });
 export type ClientDatabase = Effect.Success<ReturnType<typeof openClientDatabase>>;
 

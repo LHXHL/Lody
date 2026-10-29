@@ -35,7 +35,6 @@ renderer 不获得签名私钥或通用签名操作。
 并等待 SDK 底层读完成，再释放凭据；原件库关闭失败时保留句柄供重试。本版不自动
 回收执行证据。
 
-
 响应读取器与固定的[文件和预览功能通道](../feature/2026-10-28-e2ee-file-preview-availability.zh.md)共享；该通道通过方法体分块传输大文件，不改变派发原件、1 MiB 帧上限或执行认领。
 
 ## 证据与限制
@@ -77,3 +76,10 @@ client/server 与相同的有效合成输入。实现没有修改普通工作区
 调度、Electron IPC、冷启动认证账本刷新、广域网与实际 ACP/model 启动。没有运行
 已配对的打包 Electron/CLI agent 环境，因此真实“发送到 agent 开始”的
 p50/p95/p99 仍未测。合成 handler 在生产 claim 后进入，不代表运行中的 agent。
+
+密码与完整响应实现现位于不依赖 Node 的
+`@lody/loro-streams-rpc/e2ee-client` 入口。不可变存储端口使用 Effect，使原生 SQLite
+与浏览器 IndexedDB 共享精确意图、原件和分页语义。`e2ee-native` 只接既有 SQLite
+适配器，可选个人客户端 host 使用完整绑定的客户端 store。本地加密到首次持久保留
+是有限、不可因中断丢失所有权的操作，失败时也清理明文。远端策略预检仍可中断。
+不改变 frame、方法白名单或执行权限，不启用产品桥接。
