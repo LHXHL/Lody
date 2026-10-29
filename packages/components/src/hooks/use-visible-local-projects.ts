@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQueriesEnabled } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorkspaceId } from '@lody/shared';
@@ -51,7 +52,9 @@ export function useVisibleLocalProjectsFromMachineIndex(
 ): VisibleLocalProjectIndex {
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
+  const canQuery =
+    enabled && legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const currentUserId = useWorkspaceLocalAccountId();
   const {
     machines: visibleMachines,
@@ -60,18 +63,19 @@ export function useVisibleLocalProjectsFromMachineIndex(
   } = visibleMachineIndex;
   const queriedAccessRows = useCloudQuery(
     cloudOperations.localProjects.listVisibleLocalProjects,
-    enabled && workspaceId ? { workspaceId } : 'skip'
+    enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const rawAccessRows = queriedAccessRows ?? EMPTY_ACCESS_ROWS;
   const isLoading =
     enabled &&
     (machineVisibilityLoading ||
-      isAuthedWorkspaceQueryLoading({
-        workspaceId,
-        isConvexAuthLoading,
-        canQuery,
-        queryResult: queriedAccessRows,
-      }));
+      (legacyQueriesEnabled &&
+        isAuthedWorkspaceQueryLoading({
+          workspaceId,
+          isConvexAuthLoading,
+          canQuery,
+          queryResult: queriedAccessRows,
+        })));
 
   return useMemo(
     () =>

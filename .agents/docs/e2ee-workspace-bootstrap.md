@@ -2,7 +2,7 @@
 
 [中文](e2ee-workspace-bootstrap.zh.md)
 
-This developer preview creates a new, fixed-mode encrypted workspace and exposes its verified control history. It does not open document synchronization, chat, attachments, machines, invitations or recovery enrollment. The public OSS desktop remains local-only; cloud composition supplies the control-plane port. This is not all-platform Beta acceptance.
+Encrypted workspace creation fixes the content mode and exposes verified control history. Account membership permits control access; an admitted paired desktop can also open the protected content runtime. Legacy plaintext catalogs remain unavailable after pairing. The public OSS desktop remains local-only; cloud composition supplies the control-plane port. This is not all-platform Beta acceptance.
 
 ## Reading map
 
@@ -44,7 +44,7 @@ The cloud response binds the product workspace ID to `contentMode=e2ee`, version
 
 ## History and runtime boundary
 
-History starts at genesis and follows a fixed advertised head/count across pages. The client checks every signature, chain transition, index and final checkpoint using the core verifier. Pagination cannot silently skip, reorder, duplicate, truncate or splice records. Rows explain each ledger operation and expose original public details for inspection. The current creation slice produces the genesis record; future accepted records appear through the same reader, without invented events.
+History starts at genesis and follows a fixed advertised head/count across pages. The client checks every signature, chain transition, index and final checkpoint using the core verifier. Pagination cannot silently skip, reorder, duplicate, truncate or splice records. Rows explain each ledger operation and expose original public details for inspection. Creation starts at genesis; later accepted records appear through the same reader, without invented events.
 
 Verified history checkpoints are retained per account and workspace, with independent storage keys so concurrent windows cannot overwrite a newer observation. Only a prefix actually verified by the core is recorded. Later pages and refreshes must agree with every retained checkpoint; a failed or incomplete refresh keeps the previous history visible and never accepts a shorter or conflicting chain.
 

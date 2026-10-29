@@ -1,4 +1,6 @@
 import type { MachineId } from '@lody/shared';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { usePlatformWorkspaces } from '@lody/platform/react';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useTranslation } from 'react-i18next';
 import { workspaceFeatureUnavailableMessage } from '@/lib/workspace-feature';
@@ -32,4 +34,25 @@ export function useMachineRpcFeatureReason(
   const reason = useWorkspaceFeatureReason('rpc');
   const localMachineId = useAtomValue(localMachineIdAtom);
   return machineId && machineId === localMachineId ? undefined : reason;
+}
+
+/** Legacy plaintext catalogs are refused even after an encrypted device joins.
+ * This is a display/query choice; it never grants access to a machine or transport.
+ */
+export function useLegacyWorkspaceQueriesEnabled(workspaceId: string | null | undefined): boolean {
+  const mode = useAtomValue(workspaceContentModeAtom);
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const workspacesState = usePlatformWorkspaces();
+  if (!workspaceId) return false;
+  return !(
+    (mode?.workspaceId === workspaceId &&
+      mode.descriptor &&
+      'contentMode' in mode.descriptor &&
+      mode.descriptor.contentMode === 'e2ee') ||
+    (runtime?.workspaceId === workspaceId && runtime.contentMode === 'e2ee') ||
+    (workspacesState.status === 'ready' &&
+      workspacesState.workspaces.some(
+        (workspace) => workspace.id === workspaceId && workspace.contentMode === 'e2ee'
+      ))
+  );
 }

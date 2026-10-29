@@ -74,6 +74,10 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   With no frame owed, a press navigates and re-anchors on the route; during an owed
   frame it only advances the target. No time-based debounce.
 
+Encrypted workspaces never query legacy plaintext machine, project, inbox, GitHub
+or usage catalogs, even after pairing. Preserve ordinary errors and owner-only
+local visibility; skipping a catalog grants no machine or execution authority.
+
 ## Workspace catalog
 
 - `use-workspace-catalog.ts` reads the ref-counted room in

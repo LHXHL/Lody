@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQueriesEnabled } from '@/hooks/use-workspace-feature';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -133,7 +134,11 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   const { isAuthenticated: isConvexAuthenticated, isLoading: isConvexAuthLoading } =
     useAuthenticatedConvex();
   // Removal clears the atom before Better Auth drops its stale active organization.
-  const workspaceId = activeOrganization?.id === currentWorkspaceId ? currentWorkspaceId : null;
+  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(currentWorkspaceId);
+  const workspaceId =
+    legacyQueriesEnabled && activeOrganization?.id === currentWorkspaceId
+      ? currentWorkspaceId
+      : null;
   const canManageGithub = Boolean(workspaceId) && hasAdminPermission;
 
   const canQuery = canRunAuthedWorkspaceQuery(workspaceId, isConvexAuthenticated);

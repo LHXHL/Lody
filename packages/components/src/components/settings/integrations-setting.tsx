@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -24,7 +25,6 @@ import { invalidateGitHubTokensForWorkspace } from '@/lib/github-token';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 
 const WIDE = '@media (min-width: 640px)';
@@ -233,7 +233,7 @@ function CloudIntegrationsSettings() {
   const authorizeInBrowser = isElectronRenderer() || isNativeAppShell();
   const canAuthorizePersonalGitHub = Boolean(currentWorkspaceSlug);
 
-  const personalOperationSettings = useCloudQuery(
+  const personalOperationSettings = useLegacyWorkspaceQuery(
     cloudOperations.github.getPersonalOperationSettings,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );

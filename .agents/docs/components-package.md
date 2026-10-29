@@ -28,6 +28,20 @@ the workspace Registry, and retain ordinary machine/readiness validation. Confir
 and prepared local file receipts keep their IPC paths. Encrypted attachments use per-file keys inside protected conversation content and opaque relay parts; preparation failures preserve the draft. The [attachment decision](../notes/proposed/architecture/2026-10-28-encrypted-attachments.md) explains historical reads, local backfill receipts and cloud authorization. Local failure cannot enable an unprotected upload. See the
 [availability decision](../notes/implemented/bug-fix/2026-10-27-e2ee-feature-availability.md).
 
+Legacy cloud machine/project visibility, inbox, GitHub and usage queries stay off
+in encrypted workspaces, including paired desktops. Visibility retains only the
+existing local owner projection; absent legacy access rows never grant another
+member's machine. Account/control, billing and encrypted publication APIs retain
+their own supported paths. Ordinary query failures still reach their owning error
+boundary. Devices without an admitted encrypted runtime open the workspace control
+route for pairing; paired runtimes retain the chat route.
+
+The onboarding tour uses the real session composer. Scheduled-message draft atoms
+keep their identity while React reattaches subscriptions, and across simultaneous
+observers in separate Jotai stores. The last release evicts only after a microtask
+confirms there was no reattachment. Durable draft text remains in its existing
+storage; the transient saving flag expires with its last observer.
+
 ## Startup frame and handoff
 
 The [startup intent](../../specs/app-startup-landing.md) keeps destination selection

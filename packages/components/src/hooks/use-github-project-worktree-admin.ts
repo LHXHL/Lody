@@ -1,3 +1,5 @@
+import { useLegacyWorkspaceQueriesEnabled } from './use-workspace-feature';
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useMemo, useState } from 'react';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -7,7 +9,6 @@ import {
   isAuthedWorkspaceQueryLoading,
 } from '@/lib/authed-convex-query';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from './use-convex-error-message';
 import type { SettingsWorkspaceRepoWithStatus } from '@/components/settings/settings-data-cache';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
@@ -117,8 +118,9 @@ export function useGithubProjectWorktreeSaves() {
 export function useGithubProjectWorktreeAdmin(): GithubProjectWorktreeAdmin {
   const { workspaceId } = useResolvedWorkspaceScope();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
-  const repos = useCloudQuery(
+  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
+  const canQuery = legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const repos = useLegacyWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
     workspaceId ? { workspaceId } : 'skip'
   ) as SettingsWorkspaceRepoWithStatus[] | undefined | null;
@@ -150,12 +152,14 @@ export function useGithubProjectWorktreeAdmin(): GithubProjectWorktreeAdmin {
     return map;
   }, [cleanupErrorByKey, cleanupSavingByKey, repos, setupErrorByKey, setupSavingByKey]);
 
-  const isLoading = isAuthedWorkspaceQueryLoading({
-    workspaceId,
-    isConvexAuthLoading,
-    canQuery,
-    queryResult: repos ?? undefined,
-  });
+  const isLoading =
+    legacyQueriesEnabled &&
+    isAuthedWorkspaceQueryLoading({
+      workspaceId,
+      isConvexAuthLoading,
+      canQuery,
+      queryResult: repos ?? undefined,
+    });
 
   return { rowByRepoFullName, isLoading, onWorktreeSetupChange, onWorktreeCleanupChange };
 }

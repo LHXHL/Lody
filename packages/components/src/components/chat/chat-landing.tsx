@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQueriesEnabled } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
@@ -695,6 +696,7 @@ function WorkspaceChatLanding({
     controlConnectionState === 'syncing';
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const { workspaceId } = useResolvedWorkspaceScope();
+  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
   const setLocalProjectSharedWithTeam = useCloudMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
@@ -726,18 +728,20 @@ function WorkspaceChatLanding({
     visibleAllActiveSessions
   );
   const { archivedSessions: visibleArchivedSessions } = useVisibleArchivedSessionMetas();
-  const showProjectSharing = shouldShowSessionSharing({
-    workspaceId,
-    activeWorkspaceId: activeOrganization?.id ?? null,
-    memberCount: activeOrganization?.members.length ?? null,
-  });
+  const showProjectSharing =
+    legacyQueriesEnabled &&
+    shouldShowSessionSharing({
+      workspaceId,
+      activeWorkspaceId: activeOrganization?.id ?? null,
+      memberCount: activeOrganization?.members.length ?? null,
+    });
   const inboxRows = useCloudQuery(
     cloudOperations.inbox.listMine,
     showProjectSharing && workspaceId ? { workspaceId } : 'skip'
   );
   const sharingReviewServerState = useCloudQuery(
     cloudOperations.inbox.getSharingReviewState,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const sharingReviewInboxRevisionRef = useRef<string | null>(null);
   const sharingReviewReconcileRef = useRef({
@@ -818,7 +822,7 @@ function WorkspaceChatLanding({
   );
   const freshRepositories = useCloudQuery(
     cloudOperations.github.getWorkspaceRepositories,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const billingEntitlement = useCloudQuery(
     cloudOperations.billing.getWorkspaceBillingEntitlement,
@@ -826,7 +830,7 @@ function WorkspaceChatLanding({
   );
   const workspaceReposWithStatus = useCloudQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   ) as
     | {
         repoFullName: string;
@@ -835,11 +839,14 @@ function WorkspaceChatLanding({
       }[]
     | null
     | undefined;
-  const repositories = freshRepositories ?? cachedRepositories ?? undefined;
+  const repositories = useMemo(
+    () => (legacyQueriesEnabled ? (freshRepositories ?? cachedRepositories ?? undefined) : []),
+    [legacyQueriesEnabled, freshRepositories, cachedRepositories]
+  );
   const isElectron = isElectronRenderer();
   const launchMode = useMemo(() => detectAppLaunchMode(isElectron), [isElectron]);
   const hasGitHubRepos = (repositories?.length ?? 0) > 0;
-  const repositoriesReady = freshRepositories !== undefined;
+  const repositoriesReady = !legacyQueriesEnabled || freshRepositories !== undefined;
   const sharingReviewState = useMemo(() => {
     const privateMachineIds = Array.from(accessByMachineId.values())
       .filter((access) => access.ownerUserId === userId && !access.sharedWithTeam)

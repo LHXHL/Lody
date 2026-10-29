@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { TestCloudPlatformProvider } from './test-platform';
+
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -69,7 +71,8 @@ vi.mock('../src/components/settings/settings-data-cache', () => ({
     workspaceReposLoading: false,
   }),
 }));
-vi.mock('@lody/platform/react', () => ({
+vi.mock('@lody/platform/react', async (original) => ({
+  ...(await original<typeof import('@lody/platform/react')>()),
   useCloudQuery: () => ({ enabled: true, authorization: { state: authState.authorization } }),
   useCloudAction: () => async () => {},
   useCloudMutation: () => async () => {},
@@ -190,7 +193,11 @@ describe('GitHubSettingsView', () => {
       (button) => button.textContent?.trim() === 'Authorize'
     );
   const renderSettings = async () => {
-    await act(async () => root.render(createElement(IntegrationsSettingsComponent)));
+    await act(async () =>
+      root.render(
+        createElement(TestCloudPlatformProvider, null, createElement(IntegrationsSettingsComponent))
+      )
+    );
   };
 
   it('separates GitHub identity from repositories and keeps the search input during fold changes', async () => {
@@ -201,9 +208,13 @@ describe('GitHubSettingsView', () => {
       await act(async () =>
         root.render(
           createElement(
-            MobileSettingsFoldContext.Provider,
-            { value: fold ? { messageHeight: 300, lowerTop: 340, gapHeight: 40 } : null },
-            createElement(IntegrationsSettingsComponent)
+            TestCloudPlatformProvider,
+            null,
+            createElement(
+              MobileSettingsFoldContext.Provider,
+              { value: fold ? { messageHeight: 300, lowerTop: 340, gapHeight: 40 } : null },
+              createElement(IntegrationsSettingsComponent)
+            )
           )
         )
       );

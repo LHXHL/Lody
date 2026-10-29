@@ -1,6 +1,8 @@
+import { useLegacyWorkspaceQueriesEnabled } from './use-workspace-feature';
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation } from '@lody/platform/react';
 import { withGitHubTokenRetry, withGitHubOperationTokenRetry } from '@/lib/github-token';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
@@ -24,10 +26,16 @@ export function useGitHubPrIdentity({
   const { t } = useTranslation();
   const { isAuthenticated } = useAuthenticatedConvex();
   const requestedRepoFullName = repoFullName?.trim() || null;
+  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
   const hasInputs = Boolean(
-    enabled && workspaceId && requestedRepoFullName && prNumber && prNumber > 0
+    legacyQueriesEnabled &&
+    enabled &&
+    workspaceId &&
+    requestedRepoFullName &&
+    prNumber &&
+    prNumber > 0
   );
-  const serverVersions = useCloudQuery(
+  const serverVersions = useLegacyWorkspaceQuery(
     cloudOperations.github.getPrCacheVersions,
     hasInputs
       ? {

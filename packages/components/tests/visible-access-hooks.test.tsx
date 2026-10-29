@@ -694,7 +694,7 @@ describe('visible access hooks', () => {
         sessions: scenario.visible ? [session.id] : [],
         archived: scenario.visible ? [archived.id] : [],
         roles: scenario.visible ? [privateRole.id] : [],
-        isLoading: true,
+        isLoading: scenario.mode !== 'e2ee' || scenario.runtimeWorkspace !== 'offline-workspace',
       });
     });
   }

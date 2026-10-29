@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQueriesEnabled } from './use-workspace-feature';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -57,23 +58,26 @@ export function useVisibleMachineMetas(
   const syncMachineFlock = options.syncMachineFlock ?? true;
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
-  const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
+  const legacyQueriesEnabled = useLegacyWorkspaceQueriesEnabled(workspaceId);
+  const canQuery =
+    enabled && legacyQueriesEnabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   const currentUserId = useWorkspaceLocalAccountId();
   const queriedAccessRows = useCloudQuery(
     cloudOperations.machines.listVisibleMachines,
-    enabled && workspaceId ? { workspaceId } : 'skip'
+    enabled && legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const rawAccessRows = enabled ? (queriedAccessRows ?? EMPTY_ACCESS_ROWS) : EMPTY_ACCESS_ROWS;
   const isLoading =
     !enabled ||
-    isAuthedWorkspaceQueryLoading({
-      workspaceId,
-      isConvexAuthLoading,
-      canQuery,
-      queryResult: queriedAccessRows,
-    });
+    (legacyQueriesEnabled &&
+      isAuthedWorkspaceQueryLoading({
+        workspaceId,
+        isConvexAuthLoading,
+        canQuery,
+        queryResult: queriedAccessRows,
+      }));
 
   const baseVisibleIndex = useMemo(
     () =>
