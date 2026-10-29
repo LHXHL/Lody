@@ -5,7 +5,7 @@ import type { WorkspaceId } from '@lody/shared';
 import { userAtom, currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { postHogPrivacy, setTelemetryRouteTarget } from '@/lib/posthog-privacy';
-import { act, createElement } from 'react';
+import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFunctionName, type FunctionReference } from 'convex/server';
@@ -98,10 +98,29 @@ import { ipcBridge } from '../../../apps/electron/src/preload/ipc-bridge';
 import { createDesktopE2eeContent } from '@/providers/desktop-e2ee-content';
 import { initI18n } from '@/i18n';
 import { MachineSharingController } from '@/components/settings/e2ee/machine-sharing-settings';
-import { CloudPlatformProvider } from '@/providers/cloud-platform-provider';
+import { CloudPlatformProvider as CloudProvider } from '@/providers/cloud-platform-provider';
+import { AuthenticatedConvexContext } from '@/hooks/use-authenticated-convex';
 import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { readAuthBootstrapSnapshot, writeStoredAuthToken } from '@/lib/auth-bootstrap';
+
+function CloudPlatformProvider({ children }: { children?: ReactNode }) {
+  return (
+    <AuthenticatedConvexContext.Provider
+      value={{
+        authSessionId: 'session-a',
+        isAuthenticated: true,
+        isLoading: false,
+        isRecovering: false,
+        confirmedUnauthenticated: false,
+        claimAutomaticCommand: () => true,
+        requestAuthRecovery: () => {},
+      }}
+    >
+      <CloudProvider>{children}</CloudProvider>
+    </AuthenticatedConvexContext.Provider>
+  );
+}
 
 /** What better-auth hands back on a refetch: equal data in new objects. */
 function refetch(workspaceName: string) {
@@ -215,6 +234,64 @@ describe('CloudPlatformProvider', () => {
     act(() => store.set(userAtom, { ...user, id: 'user-b' }));
     expect(postHogPrivacy.isAllowed()).toBe(false);
   });
+
+  it('keeps telemetry closed without authenticated context even with retained plaintext state', () => {
+    refetch('Plain');
+    const store = getDefaultStore();
+    const user = { id: 'user-a', email: 'a@example.com', name: 'A', image: null };
+    store.set(userAtom, user);
+    store.set(currentWorkspaceSlugAtom, 'a');
+    store.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+    store.set(workspaceContentModeAtom, {
+      accountId: user.id,
+      workspaceSlug: 'a',
+      workspaceId: 'workspace-a',
+      descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+    });
+    setTelemetryRouteTarget('a', true);
+    act(() => root.render(createElement(CloudProvider, null, createElement(Probe))));
+    expect(seen.at(-1)!.identity.session.get()).toMatchObject({ status: 'authenticated' });
+    expect(seen.at(-1)!.workspaces.state.get()).toEqual({ status: 'loading' });
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+  });
+
+  it.each(['owner', 'admin'])(
+    'keeps encrypted email admission running for an authenticated %s',
+    async (role) => {
+      fixture.electron = true;
+      fixture.usePreload = true;
+      window.ipc = ipcBridge;
+      refetch('Encrypted');
+      fixture.organization.organizations = [
+        { id: 'workspace-a', name: 'Encrypted', contentMode: 'e2ee', role },
+      ];
+      const completed = Promise.withResolvers<void>();
+      const approvals: unknown[][] = [];
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.open') return { readerOwner: 'inbox-reader' };
+        if (channel === 'e2ee.refresh') return undefined;
+        if (channel === 'e2ee.status') return { deviceKind: 'personal', memberRole: role };
+        if (channel === 'e2ee.memberJoinRequests')
+          return { items: [{ requestId: 'email-request', source: 'email' }] };
+        if (channel === 'e2ee.approveMemberJoin') {
+          approvals.push(args);
+          return undefined;
+        }
+        if (channel === 'e2ee.close') {
+          completed.resolve();
+          return undefined;
+        }
+        throw new Error(`unexpected IPC invocation: ${channel}`);
+      };
+      await render();
+      await completed.promise;
+      expect(approvals).toEqual([['workspace-a', 'email-request', 'automatic']]);
+      expect(seen.at(-1)!.workspaces.state.get()).toMatchObject({
+        status: 'ready',
+        workspaces: [{ id: 'workspace-a', contentMode: 'e2ee' }],
+      });
+    }
+  );
 
   it('routes encrypted dispatch and ACK verification through the production provider, IPC proxy and preload', async () => {
     fixture.electron = true;
