@@ -1,7 +1,7 @@
 /** Fixed portable JSON/byte operations shared by the existing encrypted RPC paths. */
 export const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-export function unhex(value: string, frameLimit?: number): Uint8Array {
+export function unhex(value: string, frameLimit?: number): Uint8Array<ArrayBuffer> {
   if (
     typeof value !== 'string' ||
     !/^(?:[0-9a-f]{2})+$/.test(value) ||
