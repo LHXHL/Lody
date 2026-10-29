@@ -15,7 +15,7 @@ import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notificat
 import React, { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { atom, createStore, Provider } from 'jotai';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { ConvexError } from 'convex/values';
 import {
   createStore as createPlatformStore,
@@ -28,12 +28,84 @@ import {
 
 const environment = vi.hoisted(() => ({
   warm: true,
+  electron: true,
   mode: 'local',
   e2eeWorkspaces: undefined as PlatformE2eeWorkspaces | undefined,
   cachedWorkspaceId: null as string | null,
   workspace: { id: 'local:workspace', slug: 'local' } as { id: string; slug: string } | null,
   session: undefined as unknown as MutableStore<PlatformSessionState>,
   workspaces: undefined as unknown as MutableStore<WorkspacesState>,
+  transportFailure: undefined as Error | undefined,
+}));
+// Only the remote I/O is replaced below. The login regression mounts the real
+// provider, runtime, token provider and IndexedDB-backed Repo.
+const IdleRoomTransport = vi.hoisted(
+  () =>
+    class {
+      start() {}
+      async stop() {}
+      getSyncState() {
+        return 'idle' as const;
+      }
+      subscribeSyncState() {
+        return () => {};
+      }
+      subscribeDisplaySyncState() {
+        return () => {};
+      }
+      needsReconnect() {
+        return false;
+      }
+      shouldRestartOnExternalWake() {
+        return false;
+      }
+      refreshRoutes() {}
+      detachLocal() {}
+    }
+);
+vi.mock('../src/providers/workspace-presence-transport', () => ({
+  WorkspacePresenceTransport: IdleRoomTransport,
+}));
+vi.mock('../src/providers/workspace-machine-monitor-transport', () => ({
+  WorkspaceMachineMonitorTransport: IdleRoomTransport,
+}));
+vi.mock('../src/providers/workspace-prompt-suggestions', () => ({
+  WorkspacePromptSuggestions: IdleRoomTransport,
+}));
+vi.mock('@lody/loro-streams-rpc', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@lody/loro-streams-rpc')>()),
+  LoroStreamsRpcResponseDispatcher: class {
+    async start() {}
+    async stop() {}
+  },
+}));
+vi.mock('../src/providers/workspace-streams-transport', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/providers/workspace-streams-transport')>()),
+  createWorkspaceStreamsTransport: () => {
+    if (environment.transportFailure) throw environment.transportFailure;
+    let connected = false;
+    const join = () => ({
+      status: 'joined' as const,
+      firstSyncedWithRemote: Promise.resolve(),
+      onStatusChange: () => () => {},
+      unsubscribe() {},
+    });
+    return {
+      async connect() {
+        connected = true;
+      },
+      async close() {
+        connected = false;
+      },
+      isConnected: () => connected,
+      getStatus: () => (connected ? ('connected' as const) : ('disconnected' as const)),
+      onStatusChange: () => () => {},
+      syncMeta: async () => ({ ok: true }),
+      joinMetaRoom: join,
+      syncDoc: async () => ({ ok: true }),
+      joinDocRoom: join,
+    };
+  },
 }));
 vi.mock('@/atoms', () => ({
   userAtom: atom({ id: 'local:user' }),
@@ -76,9 +148,10 @@ vi.mock('@/lib/local-storage-cache', () => ({
 vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
 vi.mock('@/lib/posthog-analytics', () => ({ capturePostHogEvent: () => {} }));
 vi.mock('@/lib/clear-local-cache', () => ({ maybeClearLodyCacheOnBoot: async () => {} }));
-vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => true }));
+vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => environment.electron }));
 vi.mock('@/lib/native-platform', () => ({ isNativeAppShell: () => false }));
-vi.mock('@/lib/desktop-window', () => ({
+vi.mock('@/lib/desktop-window', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/desktop-window')>()),
   isWarmWindow: () => environment.warm,
   desktopWindowId: () => 'test-window',
 }));
@@ -118,10 +191,14 @@ import {
   savePendingE2eeWorkspace,
 } from '../src/lib/e2ee-workspace-storage';
 import {
+  authTokenAtom,
   runtimeAtom,
   workspaceModeAdmissionRetryAtom,
   workspaceRuntimeInitFailureAtom,
 } from '../src/atoms/runtime';
+import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { lodyControlConnectionStateAtom } from '../src/atoms/control-connection';
+import * as clientLog from '../src/lib/client-log';
 import {
   editSessionRunConfigDraftAtom,
   registerSessionRunConfigDraftLeaseAtom,
@@ -169,6 +246,8 @@ describe('RuntimeProvider warm workspace preparation', () => {
   let container: HTMLDivElement;
   let store: ReturnType<typeof createStore>;
   let prepared: ReturnType<typeof runtimeFixture>;
+  let actualRuntime: WorkspaceRuntime | undefined;
+  let realRuntimeSelected = false;
   const render = () =>
     act(async () => {
       root.render(
@@ -181,6 +260,10 @@ describe('RuntimeProvider warm workspace preparation', () => {
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     environment.warm = true;
+    environment.electron = true;
+    environment.transportFailure = undefined;
+    actualRuntime = undefined;
+    realRuntimeSelected = false;
     environment.mode = 'local';
     environment.e2eeWorkspaces = undefined;
     environment.cachedWorkspaceId = null;
@@ -201,6 +284,11 @@ describe('RuntimeProvider warm workspace preparation', () => {
   });
   afterEach(async () => {
     await act(async () => root.unmount());
+    if (realRuntimeSelected) {
+      await actualRuntime?.dispose();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 
   function ordinaryCloud() {
@@ -227,6 +315,127 @@ describe('RuntimeProvider warm workspace preparation', () => {
     store.set(currentWorkspaceSlugAtom, 'local');
     store.set(currentWorkspaceIdAtom, 'local:workspace');
   }
+
+  it.each(['success', 'transport failure', 'other AbortError', 'same-message Error'] as const)(
+    'handles superseded login admission and preserves the new token outcome: %s',
+    async (outcome) => {
+      realRuntimeSelected = true;
+      ordinaryCloud();
+      environment.electron = false;
+      environment.cachedWorkspaceId = 'cloud-workspace';
+      store.set(currentWorkspaceIdAtom, 'cloud-workspace');
+      store.set(authTokenAtom, 'login-token-before-refresh');
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      vi.stubEnv('VITE_CONVEX_SITE_URL', 'https://api.example.test');
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      errors.mockClear();
+      const diagnostics = vi.spyOn(clientLog, 'recordClientError');
+      diagnostics.mockClear();
+      const mode = Promise.withResolvers<{
+        workspaceId: string;
+        contentMode: 'plaintext';
+        contentModeVersion: 1;
+      }>();
+      environment.e2eeWorkspaces!.describe = () => mode.promise;
+      const requests: string[] = [];
+      vi.stubGlobal('fetch', async (_input: unknown, init?: RequestInit) => {
+        requests.push(new Headers(init?.headers).get('Authorization')!);
+        return new Response(
+          JSON.stringify({
+            token: 'streams-token',
+            expiresIn: 3600,
+            gatewayBaseUrl: 'https://streams.example.test',
+          }),
+          { status: 200 }
+        );
+      });
+      const created = Promise.withResolvers<WorkspaceRuntime>();
+      const factory = await vi.importActual<
+        typeof import('../src/providers/create-workspace-runtime')
+      >('../src/providers/create-workspace-runtime');
+      let tokens!: MockInstance<WorkspaceRuntime['setAuthToken']>;
+      vi.mocked(createWorkspaceRuntime).mockImplementation(async (deps) => {
+        try {
+          actualRuntime = await factory.createWorkspaceRuntime(deps);
+          tokens = vi.spyOn(actualRuntime, 'setAuthToken');
+          created.resolve(actualRuntime);
+          return actualRuntime;
+        } catch (error) {
+          created.reject(error);
+          throw error;
+        }
+      });
+      const failure =
+        outcome === 'other AbortError'
+          ? new DOMException('Gateway request aborted', 'AbortError')
+          : new Error(
+              outcome === 'same-message Error'
+                ? 'Authentication superseded'
+                : 'Gateway transport setup failed'
+            );
+      try {
+        await render();
+        await act(async () => {
+          await created.promise;
+        });
+        const runtime = actualRuntime!;
+        const initial = tokens.mock.results[0]!.value as Promise<void>;
+        const previous = tokens.mock.results.at(-1)!.value as Promise<void>;
+        await act(async () => {
+          store.set(authTokenAtom, 'login-token-after-refresh');
+        });
+        await expect(initial).rejects.toMatchObject({
+          name: 'AbortError',
+          message: 'Authentication superseded',
+        });
+        await expect(previous).rejects.toMatchObject({
+          name: 'AbortError',
+          message: 'Authentication superseded',
+        });
+        const latest = tokens.mock.results.at(-1)!.value as Promise<void>;
+        expect(requests).toEqual([]);
+        expect(runtime.repo.getTransportIds()).toEqual([]);
+        if (outcome !== 'success') environment.transportFailure = failure;
+        await act(async () => {
+          mode.resolve({
+            workspaceId: 'cloud-workspace',
+            contentMode: 'plaintext',
+            contentModeVersion: 1,
+          });
+          if (outcome === 'success') await latest;
+          else await expect(latest).rejects.toBe(failure);
+        });
+        expect(requests).toEqual(['Bearer login-token-after-refresh']);
+        expect(store.get(runtimeAtom)).toBe(runtime);
+        if (outcome === 'success') {
+          expect(runtime.repo.getTransportAdapter('cloud')?.isConnected()).toBe(true);
+          expect(store.get(lodyControlConnectionStateAtom)).toBe('online');
+          expect(errors.mock.calls).toEqual([]);
+          expect(diagnostics.mock.calls).toEqual([]);
+        } else {
+          expect(errors.mock.calls).toContainEqual([
+            'RuntimeProvider: set auth token failed',
+            failure,
+          ]);
+          expect(diagnostics.mock.calls).toContainEqual([
+            'runtime.operation_failed',
+            failure,
+            { operation: 'set auth token' },
+          ]);
+          expect(store.get(lodyControlConnectionStateAtom)).not.toBe('online');
+        }
+      } finally {
+        mode.resolve({
+          workspaceId: 'cloud-workspace',
+          contentMode: 'plaintext',
+          contentModeVersion: 1,
+        });
+        errors.mockRestore();
+        diagnostics.mockRestore();
+      }
+    }
+  );
 
   /** The server listing marks the workspace encrypted. Display metadata cannot
    * prove plaintext, but it is enough to demand authoritative admission. */

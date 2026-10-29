@@ -114,6 +114,14 @@ const isExpectedRuntimeShutdownError = (error: unknown): boolean => {
 };
 
 const logRuntimeOperationError = (operation: string, error: unknown): void => {
+  if (
+    error instanceof DOMException &&
+    error.name === 'AbortError' &&
+    error.message === 'Authentication superseded'
+  ) {
+    console.debug(`RuntimeProvider: ${operation} cancelled by newer authentication`);
+    return;
+  }
   if (isExpectedRuntimeShutdownError(error)) {
     console.info(`RuntimeProvider: ${operation} skipped during shutdown`);
     return;
