@@ -87,3 +87,53 @@ test('rejects namespace imports and module destructuring that bypass a normal im
   ])
     assert.ok(auditLegacyCloudSource(file, source).errors.length > 0);
 });
+
+test('recognizes registry namespace imports at both raw and guarded call sites', () => {
+  const raw = auditLegacyCloudSource(
+    file,
+    `
+    import * as registry from '@/lib/cloud-api-operations';
+    useCloudQuery(registry.cloudOperations.github.getWorkspaceRepositories, { workspaceId });
+  `
+  );
+  assert.equal(raw.errors.length, 1);
+  assert.equal(raw.rows[0].name, 'github:getWorkspaceRepositories');
+  const guarded = auditLegacyCloudSource(
+    file,
+    `
+    import * as registry from '@/lib/cloud-api-operations';
+    import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+    useLegacyWorkspaceQuery(registry.cloudOperations.github.getWorkspaceRepositories, { workspaceId });
+  `
+  );
+  assert.deepEqual(guarded.errors, []);
+  assert.equal(guarded.rows.length, 1);
+  assert.equal(guarded.rows[0].protection, 'shared admission wrapper');
+  for (const expression of [
+    'registry.cloudOperations[namespace][operation]',
+    'registry.cloudOperations.github',
+    'registry.cloudOperations',
+  ]) {
+    assert.ok(
+      auditLegacyCloudSource(
+        file,
+        `import * as registry from '@/lib/cloud-api-operations'; const escaped = ${expression};`
+      ).errors.length > 0
+    );
+  }
+});
+
+test('rejects legacy references constructed through renamed Convex factories', () => {
+  for (const source of [
+    `import { makeFunctionReference as reference } from 'convex/server'; client.query(reference('github:getWorkspaceRepositories'), input);`,
+    `import * as server from 'convex/server'; const reference = server.makeFunctionReference; reference('machines:listVisibleMachines');`,
+    `import { makeFunctionReference as makeRef } from 'convex/server'; const reference = makeRef; reference('promptShortcuts:listAccessibleDocuments');`,
+  ])
+    assert.equal(auditLegacyCloudSource(file, source).errors.length, 1, source);
+  const control = auditLegacyCloudSource(
+    file,
+    `import { makeFunctionReference as reference } from 'convex/server'; reference('e2eeWorkspaces:describe');`
+  );
+  assert.deepEqual(control.errors, []);
+  assert.deepEqual(control.rows, []);
+});

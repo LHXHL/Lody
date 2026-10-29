@@ -161,16 +161,24 @@ export function auditLegacyCloudSource(file, source) {
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const apiRoots = new Set();
   const guardedCalls = new Set();
-  const apiNamespaces = new Set();
+  const apiNamespaces = new Map();
+  const referenceFactories = new Set(['makeFunctionReference']);
+  const factoryNamespaces = new Set();
   for (const node of ast.statements) {
     if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) continue;
     const module = node.moduleSpecifier.text;
     const bindings = node.importClause?.namedBindings;
-    if (bindings && ts.isNamespaceImport(bindings) && module === '@lody/cloud-api')
-      apiNamespaces.add(bindings.name.text);
+    if (bindings && ts.isNamespaceImport(bindings)) {
+      if (module === '@lody/cloud-api') apiNamespaces.set(bindings.name.text, 'api');
+      if (module.endsWith('cloud-api-operations'))
+        apiNamespaces.set(bindings.name.text, 'cloudOperations');
+      if (module === 'convex/server') factoryNamespaces.add(bindings.name.text);
+    }
     if (!bindings || !ts.isNamedImports(bindings)) continue;
     for (const binding of bindings.elements) {
       const original = (binding.propertyName ?? binding.name).text;
+      if (module === 'convex/server' && original === 'makeFunctionReference')
+        referenceFactories.add(binding.name.text);
       if (
         (module === '@lody/cloud-api' && original === 'api') ||
         (module.endsWith('cloud-api-operations') && original === 'cloudOperations')
@@ -180,6 +188,30 @@ export function auditLegacyCloudSource(file, source) {
         guardedCalls.add(binding.name.text);
     }
   }
+  // Follow local aliases of the imported factory, including namespace properties.
+  // Operations still belong in the registry; constructing a legacy reference in
+  // a client is not an alternative to the shared admission wrappers.
+  let addedAlias;
+  do {
+    addedAlias = false;
+    for (const statement of ast.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+        const parts = chain(declaration.initializer);
+        const factory =
+          parts &&
+          ((parts.length === 1 && referenceFactories.has(parts[0])) ||
+            (parts.length === 2 &&
+              factoryNamespaces.has(parts[0]) &&
+              parts[1] === 'makeFunctionReference'));
+        if (factory && !referenceFactories.has(declaration.name.text)) {
+          referenceFactories.add(declaration.name.text);
+          addedAlias = true;
+        }
+      }
+    }
+  } while (addedAlias);
   const rows = [];
   const errors = [];
   function record(node, name) {
@@ -216,7 +248,7 @@ export function auditLegacyCloudSource(file, source) {
       parts &&
       (apiRoots.has(parts[0])
         ? parts.slice(1)
-        : apiNamespaces.has(parts[0]) && parts[1] === 'api'
+        : apiNamespaces.has(parts[0]) && parts[1] === apiNamespaces.get(parts[0])
           ? parts.slice(2)
           : null);
     if (rest?.length === 2) record(node, `${rest[0]}:${rest[1]}`);
@@ -249,7 +281,7 @@ export function auditLegacyCloudSource(file, source) {
     }
     if (ts.isStringLiteral(node) && isLegacy(node.text) && ts.isCallExpression(node.parent)) {
       const called = chain(node.parent.expression)?.at(-1);
-      if (['query', 'mutation', 'action', 'makeFunctionReference'].includes(called))
+      if (['query', 'mutation', 'action'].includes(called) || referenceFactories.has(called))
         record(node, node.text);
     }
     ts.forEachChild(node, visit);
