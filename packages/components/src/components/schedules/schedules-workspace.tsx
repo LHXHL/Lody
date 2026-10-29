@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { ScheduledMessageEditor } from './scheduled-message-editor';
@@ -13,7 +14,6 @@ import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { v4 as uuid } from 'uuid';
 import { AlertTriangle, MessageSquare, Play, Square, Trash2 } from 'lucide-react';
-import { useCloudQuery } from '@lody/platform/react';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
   getDeviceTimeZone,
@@ -670,7 +670,7 @@ function ScheduleEditor({
   const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const local = useVisibleLocalProjects({ includeMachineFlock: true });
-  const repos = useCloudQuery(
+  const repos = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     runtime ? { workspaceId: runtime.workspaceId } : 'skip'
   ) as { repoFullName?: string; fullName?: string }[] | null | undefined;

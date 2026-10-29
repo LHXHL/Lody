@@ -1,5 +1,15 @@
 // @vitest-environment jsdom
 
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  createMemoryHistory,
+  Outlet,
+  RouterProvider,
+} from '@tanstack/react-router';
+import { runtimeInitializingAtom } from '../src/atoms/control-connection';
+
 import React, { act } from 'react';
 import { JSDOM } from 'jsdom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -19,6 +29,7 @@ import { userAtom } from '../src/atoms';
 import { developerModeEnabledAtom, e2eeWorkspaceCreationEnabledAtom } from '../src/atoms/settings';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
+  runtimeAtom,
   workspaceModeAdmissionRetryAtom,
   workspaceRuntimeInitFailureAtom,
   type WorkspaceRuntimeInitFailure,
@@ -75,6 +86,69 @@ describe('WorkspaceAdmissionGate', () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it.each([false, true])(
+    'routes encrypted admission to control only without a paired runtime (paired=%s)',
+    async (paired) => {
+      Object.assign(platform.e2eeWorkspaces!, { runtime: native() });
+      const mode = {
+        accountId: 'account',
+        workspaceSlug: 'alpha',
+        workspaceId: 'encrypted',
+        descriptor: {
+          workspaceId: 'encrypted',
+          contentMode: 'e2ee' as const,
+          contentModeVersion: 1 as const,
+          activation: 'control-only' as const,
+          genesisHash: 'ab'.repeat(32),
+          cryptoOrgId: 'ab'.repeat(32),
+        },
+      };
+      store.set(workspaceContentModeAtom, mode);
+      store.set(runtimeInitializingAtom, false);
+      if (paired)
+        store.set(runtimeAtom, {
+          accountId: 'account',
+          workspaceSlug: 'alpha',
+          workspaceId: 'encrypted',
+          contentMode: 'e2ee',
+        } as never);
+      const rootRoute = createRootRoute({ component: Outlet });
+      const router = createRouter({
+        history: createMemoryHistory({ initialEntries: ['/alpha/chat'] }),
+        routeTree: rootRoute.addChildren([
+          createRoute({
+            getParentRoute: () => rootRoute,
+            path: '/alpha/chat',
+            component: () => (
+              <WorkspaceAdmissionGate workspaceName="alpha">
+                <div>encrypted chat</div>
+              </WorkspaceAdmissionGate>
+            ),
+          }),
+          createRoute({
+            getParentRoute: () => rootRoute,
+            path: '/workspace/e2ee/$workspaceId',
+            component: () => <div>Pair this desktop</div>,
+          }),
+        ]),
+      });
+      await act(async () => {
+        await router.load();
+        root.render(
+          <PlatformContext.Provider value={platform}>
+            <Provider store={store}>
+              <RouterProvider router={router} />
+            </Provider>
+          </PlatformContext.Provider>
+        );
+      });
+      expect(router.state.location.pathname).toBe(
+        paired ? '/alpha/chat' : '/workspace/e2ee/encrypted'
+      );
+      expect(text()).toContain(paired ? 'encrypted chat' : 'Pair this desktop');
+    }
+  );
 
   it('explains terminal member removal and requires a new invitation', async () => {
     fail({ errorType: 'e2ee_member_removed' });

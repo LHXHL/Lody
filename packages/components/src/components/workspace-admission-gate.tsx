@@ -172,15 +172,6 @@ export function WorkspaceAdmissionGate({
           description={t('workspace.route.loadingDescription')}
         />
       );
-    if (platform.e2eeWorkspaces.runtime)
-      return (
-        <RouteMessage
-          gate={null}
-          title={t('e2ee.access.waitingKey.title')}
-          description={t('e2ee.access.waitingKey.description')}
-          onRetry={() => retryAdmission((value) => value + 1)}
-        />
-      );
     return (
       <BootNavigate
         to="/workspace/e2ee/$workspaceId"

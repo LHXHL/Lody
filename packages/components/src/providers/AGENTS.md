@@ -30,6 +30,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Prompt Shortcuts instances belong to one initialization effect lifetime. Cleanup
   must retire the published instance immediately, before asynchronous durable close.
   Never reuse retired instances; fence platform, cloud capability and retry generation.
+  Cloud discovery, store opening, tokens and writes require the shared legacy
+  admission verdict; unknown waits and encrypted disables. Preserve the local store path.
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
   require that target, the active runtime, and the runtime-owned doc-meta snapshot to agree
   before reading singleton caches. Shared visibility and sharing hooks enforce this gate by

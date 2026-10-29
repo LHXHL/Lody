@@ -1,6 +1,6 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { useCallback, useMemo } from 'react';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import type {
@@ -378,7 +378,7 @@ export function useSessionActions(): SessionActions {
   );
   const postHog = usePostHog();
   const { isAuthenticated: isConvexAuthenticated, requestAuthRecovery } = useAuthenticatedConvex();
-  const recordMyWorkspaceDailyActiveUser = useCloudMutation(
+  const recordMyWorkspaceDailyActiveUser = useLegacyWorkspaceMutation(
     cloudOperations.activity.recordMyWorkspaceDailyActiveUser
   );
 

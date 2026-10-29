@@ -2,7 +2,7 @@
 
 [中文](e2ee-workspace-bootstrap.zh.md)
 
-This developer preview creates a new, fixed-mode encrypted workspace and exposes its verified control history. It does not open document synchronization, chat, attachments, machines, invitations or recovery enrollment. The public OSS desktop remains local-only; cloud composition supplies the control-plane port. This is not all-platform Beta acceptance.
+Encrypted workspace creation fixes the content mode and exposes verified control history. Account membership permits control access; an admitted paired desktop can also open the protected content runtime. Legacy plaintext catalogs remain unavailable after pairing. The public OSS desktop remains local-only; cloud composition supplies the control-plane port. This is not all-platform Beta acceptance.
 
 ## Reading map
 
@@ -44,7 +44,7 @@ The cloud response binds the product workspace ID to `contentMode=e2ee`, version
 
 ## History and runtime boundary
 
-History starts at genesis and follows a fixed advertised head/count across pages. The client checks every signature, chain transition, index and final checkpoint using the core verifier. Pagination cannot silently skip, reorder, duplicate, truncate or splice records. Rows explain each ledger operation and expose original public details for inspection. The current creation slice produces the genesis record; future accepted records appear through the same reader, without invented events.
+History starts at genesis and follows a fixed advertised head/count across pages. The client checks every signature, chain transition, index and final checkpoint using the core verifier. Pagination cannot silently skip, reorder, duplicate, truncate or splice records. Rows explain each ledger operation and expose original public details for inspection. Creation starts at genesis; later accepted records appear through the same reader, without invented events.
 
 Verified history checkpoints are retained per account and workspace, with independent storage keys so concurrent windows cannot overwrite a newer observation. Only a prefix actually verified by the core is recorded. Later pages and refreshes must agree with every retained checkpoint; a failed or incomplete refresh keeps the previous history visible and never accepts a shorter or conflicting chain.
 
@@ -64,6 +64,8 @@ A locally pinned genesis is independent of the history response. A device withou
 A known encrypted mode or genesis pin takes precedence over a later server claim of plaintext. Ordinary cache cleanup must preserve these identity records. An authenticated plaintext descriptor is retained per account and workspace ID for later offline startup because mode cannot change in place; a proof saved under an earlier slug still applies and is rewritten under the current slug. After the session is confirmed, the runtime provider also retains proofs for the other listed, not-encrypted workspaces in the background. The control-only encrypted route never constructs the old Repo/execution runtime. Backend admission independently rejects its ordinary Streams, token, sharing and execution routes.
 
 A workspace without encrypted evidence may open its local Repo before authenticated mode classification, so local reads and editing do not wait for the network. A cached workspace ID or a provisional `descriptor: null` grants no ordinary body egress. The provider owns one classification result for that initialization; transport attachment, tokens, RPC, accepted sends, sharing and exports wait for it. An encrypted or contradictory answer retires the provisional runtime before any ordinary path can use its bytes. A lookup failure leaves local data available and outbound work rejected or pending; it never classifies the workspace as plaintext. A later send or online event can retry the read, and a newly retained matching ordinary/legacy proof can recover admission on the same Repo. Retained immutable ordinary/legacy admission still opens offline without a new lookup. Encryption evidence, pins and encrypted listings retain their stricter content-open admission. See [the egress decision](../notes/implemented/bug-fix/2026-10-29-unknown-workspace-egress.md). Direct attachment I/O also requires account/workspace-bound mode proof before sending source bytes; provisional runtime admission cannot authorize HTTP or local attachment fallback. Failed verification preserves the composer for retry.
+
+Legacy remote machine/project, inbox, GitHub, shortcut and usage catalogs also wait for the runtime admission atom to hold a trusted ordinary or legacy descriptor matching the current account, workspace ID and routed slug. A provisional runtime or an unmarked listing cannot enable these queries. Unknown catalogs remain pending while local reads and input remain available.
 
 Legacy organizations with all four mode/crypto fields absent may receive an explicit `legacy-unclassified` admission only after the service excludes retained encrypted-workspace evidence. That preserves their existing behavior without classifying them as plaintext. This account/workspace/slug-bound admission can also be retained for offline startup; a local encrypted pin always overrides it. Partial or unknown formats and lookup failures never grant this compatibility path.
 

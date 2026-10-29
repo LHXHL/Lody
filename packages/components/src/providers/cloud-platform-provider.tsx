@@ -1,3 +1,5 @@
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { assertLegacyWorkspaceAccess } from '@/lib/legacy-workspace-admission';
 import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
 import {
   useCallback,
@@ -39,7 +41,7 @@ import { createCloudE2eeWorkspaces } from './cloud-e2ee-workspaces';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { installGitHubTokenPort } from '@/lib/github-token-port';
-import { cloudGitHubTokenPort } from './cloud-github-token-port';
+import { createCloudGitHubTokenPort } from './cloud-github-token-port';
 import { installAttachmentWorkspaceAccess } from '@/lib/attachment-workspace-access';
 import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import { localAgentEnabledAtom } from '@/atoms/local-probe';
@@ -161,7 +163,22 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
       for (const unsubscribe of unsubscribes) unsubscribe();
     };
   }, [atomStore, sessionStore, workspacesStore]);
-  const [uninstallGitHubTokenPort] = useState(() => installGitHubTokenPort(cloudGitHubTokenPort));
+  const [uninstallGitHubTokenPort] = useState(() =>
+    installGitHubTokenPort(
+      createCloudGitHubTokenPort((workspaceId) =>
+        assertLegacyWorkspaceAccess({
+          workspaceId,
+          platformKind: 'cloud',
+          mode: atomStore.get(workspaceContentModeAtom),
+          runtime: atomStore.get(activeWorkspaceRuntimeAtom),
+          accountId: atomStore.get(userAtom)?.id ?? null,
+          currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
+          routeSlug: atomStore.get(currentWorkspaceSlugAtom),
+          workspacesState: workspacesStore.get(),
+        })
+      )
+    )
+  );
   const [uninstallCloudHttpPort] = useState(() => installCloudHttpPort(CLOUD_HTTP_PORT));
 
   useEffect(() => uninstallGitHubTokenPort, [uninstallGitHubTokenPort]);

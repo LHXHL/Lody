@@ -1,9 +1,13 @@
+import {
+  useLegacyWorkspaceAction,
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
 import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
-import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -31,7 +35,6 @@ import { invalidateGitHubTokensForWorkspace } from '@/lib/github-token';
 import { GitHubPersonalIdentitySettingsCard } from '@/components/settings/integrations-setting';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
@@ -73,16 +76,18 @@ function MobileCloudIntegrationsSettings() {
   const canAuthorizePersonalGitHub = Boolean(currentWorkspaceSlug);
 
   const [repoSearch, setRepoSearch] = useState('');
-  const personalOperationSettings = useCloudQuery(
+  const personalOperationSettings = useLegacyWorkspaceQuery(
     cloudOperations.github.getPersonalOperationSettings,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
-  const createGitHubInstallState = useCloudAction(cloudOperations.github.createGitHubInstallState);
-  const setRepoEnabled = useCloudMutation(cloudOperations.github.setRepoEnabled);
-  const setPersonalOperationPreference = useCloudMutation(
+  const createGitHubInstallState = useLegacyWorkspaceAction(
+    cloudOperations.github.createGitHubInstallState
+  );
+  const setRepoEnabled = useLegacyWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+  const setPersonalOperationPreference = useLegacyWorkspaceMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useCloudAction(
+  const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);

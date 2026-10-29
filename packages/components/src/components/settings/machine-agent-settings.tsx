@@ -1,10 +1,13 @@
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
-import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   type AcpSessionMonitorSnapshot,
@@ -56,7 +59,6 @@ import {
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { useMachineMonitor } from '@/hooks/use-machine-monitor';
@@ -768,7 +770,7 @@ export function MachineAgentSettings({
     : mode === 'machines' && remoteMachinesAvailable && visibleSelectedMachineId === null
       ? undefined
       : resolvedDesktopMachine;
-  const credentialState = useCloudQuery(
+  const credentialState = useLegacyWorkspaceQuery(
     cloudOperations.machineCredentials.getMachineCredentialState,
     mode === 'machines' &&
       workspaceId &&
@@ -777,7 +779,7 @@ export function MachineAgentSettings({
       ? { workspaceId, machineId: resolvedSelectedMachine.id }
       : 'skip'
   );
-  const revokeMachineCredentialsMutation = useCloudMutation(
+  const revokeMachineCredentialsMutation = useLegacyWorkspaceMutation(
     cloudOperations.machineCredentials.revokeMachineCredentials
   );
 

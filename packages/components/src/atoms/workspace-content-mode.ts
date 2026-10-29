@@ -6,6 +6,7 @@ import type { WorkspaceAdmissionDescriptor } from '@lody/cloud-api';
  * encryption evidence exists, so the Repo may open before classification, but
  * body egress and consuming a send wait for authenticated admission. An encrypted
  * answer retires that provisional runtime before the verdict changes.
+ * Legacy remote catalogs also await the bound ordinary/legacy descriptor.
  */
 export type WorkspaceContentMode =
   | {

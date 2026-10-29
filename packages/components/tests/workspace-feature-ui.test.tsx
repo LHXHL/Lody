@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
@@ -273,3 +273,55 @@ it.each(['en', 'zh_CN'])(
     expect(container.querySelector('button')?.disabled).toBe(false);
   }
 );
+
+it('shares a scheduled draft through observer replacement and preserves it after remount', async () => {
+  const store = createStore();
+  const session = { id: 'scheduled-observer-replacement' } as SessionMeta;
+  const at = '2030-01-01T12:00:00.000Z';
+  function Draft({ label }: { label: string }) {
+    const state = useScheduledMessageDraft(session, null);
+    return (
+      <div data-observer={label}>
+        <output>
+          {state.at ?? 'empty'}:{String(state.saving)}
+        </output>
+        <button
+          onClick={() => {
+            state.apply(at);
+            state.setSaving(true);
+          }}
+        >
+          Set draft
+        </button>
+      </div>
+    );
+  }
+  const renderObservers = (first: boolean, second: boolean) =>
+    act(async () =>
+      root.render(
+        <StrictMode>
+          <Provider store={store}>
+            {first ? <Draft key="first" label="first" /> : null}
+            {second ? <Draft key="second" label="second" /> : null}
+          </Provider>
+        </StrictMode>
+      )
+    );
+  await renderObservers(true, true);
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('[data-observer="first"] button')!.click()
+  );
+  expect([...container.querySelectorAll('output')].map((node) => node.textContent)).toEqual([
+    `${at}:true`,
+    `${at}:true`,
+  ]);
+  await renderObservers(false, true);
+  await renderObservers(true, true);
+  expect([...container.querySelectorAll('output')].map((node) => node.textContent)).toEqual([
+    `${at}:true`,
+    `${at}:true`,
+  ]);
+  await renderObservers(false, false);
+  await renderObservers(true, false);
+  expect(container.querySelector('output')!.textContent).toBe(`${at}:false`);
+});
