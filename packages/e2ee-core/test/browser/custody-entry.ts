@@ -1,4 +1,4 @@
-import { Context, Effect, Exit, Layer, Result, Scope } from 'effect';
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Result, Scope } from 'effect';
 import { browserClientCustody, browserClientWriter } from '../../src/adapters/browser-custody';
 import {
   indexedDbClientInstallationStore,
@@ -506,6 +506,28 @@ export async function invoke(action: string) {
               );
             return out;
           }
+          case 'forkWrap': {
+            const decided = yield* Deferred.make<void>();
+            (globalThis as unknown as { notifyEntered: () => void }).notifyEntered = () =>
+              Deferred.doneUnsafe(decided, Effect.void);
+            const child = yield* writer.run(
+              Effect.gen(function* () {
+                const fiber = yield* Effect.forkChild(
+                  custody
+                    .wrap('signing-private-key', secrets[0])
+                    .pipe(Effect.onExit(() => Deferred.succeed(decided, undefined)))
+                );
+                yield* Deferred.await(decided);
+                return fiber;
+              })
+            );
+            (globalThis as unknown as { outerReturned: boolean }).outerReturned = true;
+            return yield* Fiber.join(child);
+          }
+          case 'nestedWrap':
+            return yield* writer.run(custody.wrap('signing-private-key', secrets[0]));
+          case 'wrapEpoch':
+            return yield* custody.wrap('installed-epoch-key', new Uint8Array(32).fill(0x44));
           case 'wrapSigning':
             return yield* custody.wrap('signing-private-key', secrets[0]);
           case 'create':

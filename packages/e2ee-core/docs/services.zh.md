@@ -223,6 +223,7 @@ WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器
 `ClientCustodyWriter`。宿主先进入 `writer.run` 再分配安装，持有到有限的本地保护/
 存储工作真正结束，网络等待前释放。Web Lock 按 origin 内账号/工作区/genesis 跨
 标签页和 Worker 互斥，不按数据库名或设备分锁。忙时 conflict，不排队、不抢占。
+仅持锁的同一 fiber 可重入；子 fiber 必须自己拿物理锁，父 fiber 持有期间返回 conflict。
 关闭阻止新调用，等待实际原生调用结束。
 
 `indexedDbClientInstallationStore(options)` 先捕获稳定作用域，再由宿主读取身份。
@@ -240,7 +241,10 @@ create 前必须持久化准备。候选创建还要求 `ClientPairingOriginalSt
 KEK 是持久、不可导出的原生 AES-GCM-256 CryptoKey。先保存创建意图，再生成密钥；
 marker/key/probe 读回与真实解密共同证明保护可用。每次可用性检查还在一个读写事务内
 修改、读回并恢复探针，被忽略的写入或只读存储不能宣称可用。安装、marker、key 或
-nonce 账本单边缺失均阻塞，不以内存或新身份降级。加密前持久保留随机 nonce 并递增
+nonce 账本单边缺失均阻塞，不以内存或新身份降级。marker/key 均缺失时，该完整安装
+绑定的原件、journal 或 nonce 残留仍阻止创建；空状态核对和创建意图在同一事务。
+可能失败的可写/解密探针先于包装意图，已知加密前故障不留下未知占位。意图提交后，
+持续持有写者和借入缓冲，实际加密/密文保留之间不留可中断空档。加密前持久保留随机 nonce 并递增
 计数，原生加密在 IDB 事务外进行。首次密文获胜；未知意图不重新加密，同次调用保留
 的密文只能重试提交。v1 前缀/AAD 与五种用途遵循既有共享固定向量。
 `clientKeyProtectors` 分别适配 installed-epoch 与 rotation-candidate 用途。

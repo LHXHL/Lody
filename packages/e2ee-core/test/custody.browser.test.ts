@@ -648,3 +648,221 @@ it.each(['chromium', 'webkit'] as const)(
     }
   }
 );
+
+async function withCustodyBrowser(
+  engine: 'chromium' | 'webkit',
+  work: (page: Page, peer: Page) => Promise<void>
+) {
+  const output = await build({
+    entryPoints: [fileURLToPath(new URL('./browser/custody-entry.ts', import.meta.url))],
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    globalName: 'CustodyFixture',
+    target: 'safari16.4',
+    write: false,
+    logLevel: 'silent',
+  });
+  const dir = await mkdtemp(join(tmpdir(), 'lody-custody-recovery-'));
+  let context: BrowserContext | undefined;
+  try {
+    const file = join(dir, 'index.html');
+    await writeFile(
+      file,
+      '<!doctype html><script>' +
+        output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+        '</script>'
+    );
+    context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+      join(dir, 'profile'),
+      { headless: true }
+    );
+    const page = await context.newPage(),
+      peer = await context.newPage();
+    await page.goto(pathToFileURL(file).href);
+    await peer.goto(pathToFileURL(file).href);
+    await work(page, peer);
+  } finally {
+    await context?.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+it.each(['chromium', 'webkit'] as const)(
+  'refuses KEK recreation over prepared wrapping originals in %s',
+  async (engine) => {
+    await withCustodyBrowser(engine, async (page) => {
+      await boot(page, 'residual-originals');
+      for (const action of ['prepare', 'create', 'wrapOnly'])
+        expect((await call(page, action)).ok).toBe(true);
+      const receipt = await call(page, 'read'),
+        originals = await call(page, 'identityOriginals');
+      expect(originals.value).toHaveLength(3);
+      await stop(page);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const request = indexedDB.open('residual-originals', 1);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+              const db = request.result,
+                tx = db.transaction(['keys', 'markers', 'nonces'], 'readwrite');
+              for (const table of ['keys', 'markers', 'nonces']) tx.objectStore(table).clear();
+              tx.oncomplete = () => {
+                db.close();
+                resolve();
+              };
+              tx.onabort = () => {
+                db.close();
+                reject(tx.error);
+              };
+            };
+          })
+      );
+      await boot(page, 'residual-originals', 'open-existing');
+      const status = await call(page, 'status'),
+        created = await call(page, 'create');
+      expect(status.ok).toBe(false);
+      expect(created.ok).toBe(false);
+      expect(await call(page, 'read')).toEqual(receipt);
+      expect(await call(page, 'identityOriginals')).toEqual(originals);
+      const counts = await page.evaluate(
+        () =>
+          new Promise<number[]>((resolve, reject) => {
+            const request = indexedDB.open('residual-originals', 1);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+              const db = request.result,
+                names = ['keys', 'markers', 'nonces'],
+                tx = db.transaction(names, 'readonly');
+              const storedCounts: number[] = [];
+              names.forEach((name, i) => {
+                const count = tx.objectStore(name).count();
+                count.onsuccess = () => {
+                  storedCounts[i] = count.result;
+                };
+              });
+              tx.oncomplete = () => {
+                db.close();
+                resolve(storedCounts);
+              };
+              tx.onabort = () => {
+                db.close();
+                reject(tx.error);
+              };
+            };
+          })
+      );
+      expect(counts).toEqual([0, 0, 0]);
+      await stop(page);
+    });
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'does not lend inherited writer ownership to a child fiber in %s',
+  async (engine) => {
+    await withCustodyBrowser(engine, async (page, peer) => {
+      await page.evaluate(() => {
+        const encrypt = SubtleCrypto.prototype.encrypt;
+        (globalThis as any).cryptoEntered = false;
+        (globalThis as any).holdEncrypt = true;
+        SubtleCrypto.prototype.encrypt = async function (...args) {
+          const result = await Reflect.apply(encrypt, this, args);
+          if ((args[2] as Uint8Array).byteLength === 32 && (globalThis as any).holdEncrypt) {
+            (globalThis as any).borrowed = args[2];
+            (globalThis as any).cryptoEntered = true;
+            (globalThis as any).notifyEntered();
+            await new Promise<void>((resolve) => {
+              (globalThis as any).releaseEncrypt = resolve;
+            });
+          }
+          return result;
+        };
+      });
+      await boot(page, 'forked-writer');
+      for (const action of ['prepare', 'create']) expect((await call(page, action)).ok).toBe(true);
+      await boot(peer, 'forked-writer', 'open-existing');
+      const writing = call(page, 'forkWrap');
+      await page.waitForFunction(() => (globalThis as any).outerReturned === true);
+      let state: { entered: boolean; held: number }, peerStatus: any;
+      try {
+        state = await page.evaluate(async () => ({
+          entered: (globalThis as any).cryptoEntered,
+          held: (await navigator.locks.query()).held!.length,
+        }));
+        peerStatus = await call(peer, 'status');
+      } finally {
+        await page.evaluate(() => {
+          (globalThis as any).holdEncrypt = false;
+          (globalThis as any).releaseEncrypt?.();
+        });
+      }
+      const result = await writing;
+      // Child work must acquire its own physical lease instead of inheriting the parent's reentry token.
+      expect(state.entered).toBe(false);
+      expect(result).toEqual({ ok: false, reason: 'conflict' });
+      expect(state.held).toBe(0);
+      expect(peerStatus).toEqual({ ok: true, value: 'available' });
+      expect((await call(page, 'identityOriginals')).value).toEqual([]);
+      const nested = await call(page, 'nestedWrap');
+      expect(nested.ok).toBe(true);
+      expect(await call(page, 'wrapSigning')).toEqual(nested);
+      await stop(page);
+      await stop(peer);
+    });
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'retries a quota failure before encryption without leaving an unknown intent in %s',
+  async (engine) => {
+    await withCustodyBrowser(engine, async (page) => {
+      await page.evaluate(() => {
+        const encrypt = SubtleCrypto.prototype.encrypt;
+        (globalThis as any).payloadEncryptions = 0;
+        SubtleCrypto.prototype.encrypt = function (...args) {
+          if ((args[2] as Uint8Array).byteLength === 32) (globalThis as any).payloadEncryptions++;
+          return Reflect.apply(encrypt, this, args);
+        };
+      });
+      await boot(page, 'preflight-quota');
+      for (const action of ['prepare', 'create']) expect((await call(page, action)).ok).toBe(true);
+      await page.evaluate(() => {
+        const put = IDBObjectStore.prototype.put;
+        let failed = false;
+        IDBObjectStore.prototype.put = function (...args) {
+          if (
+            this.name === 'meta' &&
+            args[1] === 'writable-probe' &&
+            args[0]?.writable === true &&
+            !failed
+          ) {
+            failed = true;
+            throw new DOMException('synthetic quota before encryption', 'QuotaExceededError');
+          }
+          return Reflect.apply(put, this, args);
+        };
+        (globalThis as any).restorePut = () => {
+          IDBObjectStore.prototype.put = put;
+        };
+      });
+      try {
+        expect((await call(page, 'wrapEpoch')).ok).toBe(false);
+      } finally {
+        await page.evaluate(() => (globalThis as any).restorePut());
+      }
+      expect(await page.evaluate(() => (globalThis as any).payloadEncryptions)).toBe(0);
+      expect((await call(page, 'status')).value).toBe('available');
+      const wrapped = await call(page, 'wrapEpoch');
+      expect(wrapped.ok).toBe(true);
+      expect(await call(page, 'wrapEpoch')).toEqual(wrapped);
+      expect(await page.evaluate(() => (globalThis as any).payloadEncryptions)).toBe(1);
+      await stop(page);
+      await boot(page, 'preflight-quota', 'open-existing');
+      expect(await call(page, 'wrapEpoch')).toEqual(wrapped);
+      expect(await page.evaluate(() => (globalThis as any).payloadEncryptions)).toBe(1);
+      await stop(page);
+    });
+  }
+);

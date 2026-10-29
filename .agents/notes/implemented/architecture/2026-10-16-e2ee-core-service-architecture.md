@@ -168,10 +168,18 @@ windows. The host instead enters a scope-wide finite Web Lock before identity
 allocation, holds it through real local/native settlement, then releases before
 network waits. Database/device-specific locks would admit competing installations;
 stealing on cancellation would let unfinished native work overlap its successor.
+Reentry therefore checks the actual holding fiber, not just inherited Context. A
+child must acquire its own lease; counting arbitrary descendant borrows adds
+ownership machinery where the finite local sequence needs no parallel writer.
 
 A nonextractable key alone is insufficient: a retained creation intent, key/probe
 readback, actual decrypt and transactional write/readback/restore establish usable
-persistent protection. Nonce reservation/count precedes native encryption, so an
+persistent protection. Missing marker/key cannot establish first use while any
+scoped original, nonce or journal remains; the creation transaction checks all
+incarnation partitions. Fallible availability probes precede wrapping intent, so
+a transient quota fault before encryption can retry. Once intent commits, native
+encryption and ciphertext retention remain uninterruptible: a crash or genuinely
+unknown result still cannot safely be retried as a new encryption. Nonce reservation/count precedes native encryption, so an
 unknown result cannot trigger a second encryption. Completed originals reconcile
 exactly; ambiguous partials stay blocked. The scope-wide installation pointer and
 retired archive remain atomic, retaining old journals across desktop-approved

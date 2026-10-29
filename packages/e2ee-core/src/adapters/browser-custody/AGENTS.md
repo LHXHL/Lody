@@ -11,11 +11,17 @@ Implementation and ownership: [services](../../../docs/services.md#browser-custo
 - Web Locks bind the origin's account/workspace/genesis scope. Enter the writer
   before identity allocation; hold it through actual local/native settlement and
   release before network. Busy returns conflict; never steal or infer termination
-  from cancellation or a deadline. Close fences admission and drains admitted work.
+  from cancellation or a deadline. Only the holding fiber may reenter; inherited
+  child-fiber context never lends physical ownership. Close fences admission and drains admitted work.
 - Persist creation intent before generating the non-extractable AES-GCM key.
   Marker/key/probe and actual key readback establish protection only. Probe native
   write/readback/restore before reporting availability; missing halves never initialize.
-- Reserve each random nonce durably before encryption and retain its record.
+  Before creation intent, reject any retained protection/original for that full
+  incarnation in the same transaction, including when marker and key are both absent.
+- Complete fallible availability checks before committing a wrapping intent. After
+  nonce/intent commit, retain ownership through actual encryption/ciphertext settlement
+  without an interruption gap. Pre-encryption probe/transaction failures remain retryable.
+  Reserve each random nonce durably before encryption and retain its record.
   Validate nonce count and probe membership across reopen; a missing ledger blocks.
   Completed wrapping originals win. Unknown intents never re-encrypt; only the same
   operation's retained ciphertext may retry its commit. Never await crypto inside IDB.

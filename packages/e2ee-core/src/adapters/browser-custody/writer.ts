@@ -13,10 +13,10 @@ export interface BrowserClientWriterOptions {
 }
 class HeldWriter extends Context.Service<
   HeldWriter,
-  { readonly owner: object; readonly active: () => boolean }
+  { readonly owner: object; readonly fiberId: number; readonly active: () => boolean }
 >()('ClientCustody/HeldWriter') {}
 const fail = (reason: ClientCustodyError['reason']) => new ClientCustodyError({ reason });
-/** Origin-wide Web Locks exclusion. Busy fails conflict; no stealing, timeout or memory-only fallback. Scope close fences admission and drains actual work before releasing locks. */
+/** Origin-wide Web Locks exclusion. Only the holding fiber may reenter; child fibers acquire their own lease. Busy fails conflict; no stealing, timeout or memory-only fallback. Scope close fences admission and drains actual work before releasing locks. */
 export const browserClientWriter = (input: BrowserClientWriterOptions) => {
   const options = { ...input };
   return Layer.effect(
@@ -76,13 +76,21 @@ export const browserClientWriter = (input: BrowserClientWriterOptions) => {
         run: <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<A, E | ClientCustodyError, R> =>
           gate.run(
             Effect.gen(function* () {
-              const held = yield* Effect.serviceOption(HeldWriter);
-              if (Option.isSome(held) && held.value.owner === owner && held.value.active())
+              const held = yield* Effect.serviceOption(HeldWriter),
+                fiberId = yield* Effect.fiberId;
+              if (
+                Option.isSome(held) &&
+                held.value.owner === owner &&
+                held.value.fiberId === fiberId &&
+                held.value.active()
+              )
                 return yield* work;
               return yield* Effect.acquireUseRelease(
                 acquire,
                 (lease) =>
-                  work.pipe(Effect.provideService(HeldWriter, { owner, active: lease.held })),
+                  work.pipe(
+                    Effect.provideService(HeldWriter, { owner, fiberId, active: lease.held })
+                  ),
                 (lease) => Effect.promise(lease.release)
               );
             })

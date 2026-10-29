@@ -312,7 +312,9 @@ under `WorkspaceScope`. Enter `writer.run` before allocating an installation, ho
 it through finite local protection/storage work, and release before network waits.
 The origin's Web Lock binds account/workspace/genesis across tabs and workers,
 independent of database/device names. Busy fails conflict without queueing or
-stealing. Close fences new calls and waits for actual native settlement.
+stealing. Reentry is limited to the holding fiber; a child fiber must acquire its
+own lease and fails conflict while the parent holds it. Close fences new calls
+and waits for actual native settlement.
 
 `indexedDbClientInstallationStore(options)` captures the stable scope before the
 host knows its device. Ordinary CAS retains the first incarnation and wrapped
@@ -336,7 +338,12 @@ creation intent precedes generation; marker/key/probe readback and actual decryp
 qualify it. Availability also changes, reads back and restores a probe in one
 readwrite transaction: ignored writes/read-only storage cannot report usable.
 Missing marker, key, installation or nonce ledger blocks; no memory fallback or
-implicit new identity. Each nonce is reserved with a monotonic count before native
+implicit new identity. When marker/key are both absent, scoped original, journal
+and nonce records still prevent creation; the empty-state check shares the intent
+transaction. The fallible writable/decrypt probes run before wrapping intent
+reservation, so a known pre-encryption fault leaves no unknown placeholder. Once
+reserved, actual encryption/ciphertext settlement finishes without an interruption
+gap while retaining the writer and borrowed buffers. Each nonce is reserved with a monotonic count before native
 encryption outside IDB. First ciphertext wins; an unknown intent never encrypts
 again. A same-operation retained ciphertext may retry only its commit. The v1
 prefix/AAD and all five purposes use the shared fixed vector unchanged.

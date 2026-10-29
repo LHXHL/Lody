@@ -208,14 +208,43 @@ export const browserClientCustody = (input: BrowserClientCustodyOptions) => {
         if (current) return yield* fail('conflict');
         return null;
       });
+      const nonceRange = () => IDBKeyRange.bound(id + '/', id + '/~');
+      const protectionTables = ['markers', 'keys', 'data', 'nonces', 'snapshots'];
+      // Absence is scoped to the full incarnation, including first wrappers and pending intents.
+      const noProtectionRecords = (tx: Transaction, done: () => void) => {
+        const prefix = JSON.stringify([id]).slice(0, -1) + ',';
+        const ranges: readonly (readonly [string, IDBKeyRange])[] = [
+          ['data', IDBKeyRange.bound(prefix, prefix + '\uffff')],
+          ['data', IDBKeyRange.bound([id], [id, []])],
+          ['nonces', nonceRange()],
+          ['snapshots', IDBKeyRange.bound(['meta', id], ['meta', id, []])],
+          ['snapshots', IDBKeyRange.bound(['row', id], ['row', id, []])],
+        ];
+        const check = (index: number): void => {
+          if (index === ranges.length) {
+            done();
+            return;
+          }
+          const [table, range] = ranges[index];
+          tx.request(tx.store(table).count(range), (count) => {
+            if (count !== 0) throw fail('identity-lost');
+            check(index + 1);
+          });
+        };
+        check(0);
+      };
       const read = () =>
         db.run<{ marker: ReturnType<typeof marker>; key: CryptoKey | null }>(
           'ClientKeyCustody',
-          ['markers', 'keys'],
+          protectionTables,
           'readonly',
           (tx, done) =>
             tx.request(tx.store('markers').get(id), (m) =>
-              tx.request(tx.store('keys').get(id), (k) => done({ marker: marker(m), key: key(k) }))
+              tx.request(tx.store('keys').get(id), (k) => {
+                const finish = () => done({ marker: marker(m), key: key(k) });
+                if (m === undefined && k === undefined) noProtectionRecords(tx, finish);
+                else finish();
+              })
             )
         );
       const native = <A>(work: () => Promise<A>) =>
@@ -237,7 +266,6 @@ export const browserClientCustody = (input: BrowserClientCustodyOptions) => {
             )
           );
         });
-      const nonceRange = () => IDBKeyRange.bound(id + '/', id + '/~');
       const checkNonces = (
         tx: Transaction,
         m: NonNullable<ReturnType<typeof marker>>,
@@ -353,14 +381,11 @@ export const browserClientCustody = (input: BrowserClientCustodyOptions) => {
                 nonceCount: 0,
                 probe: null,
               };
-              yield* db.run<void>(
-                'ClientKeyCustody',
-                ['markers', 'keys'],
-                'readwrite',
-                (tx, done) =>
-                  tx.request(tx.store('markers').get(id), (m) =>
-                    tx.request(tx.store('keys').get(id), (k) => {
-                      if (m !== undefined || k !== undefined) throw fail('conflict');
+              yield* db.run<void>('ClientKeyCustody', protectionTables, 'readwrite', (tx, done) =>
+                tx.request(tx.store('markers').get(id), (m) =>
+                  tx.request(tx.store('keys').get(id), (k) => {
+                    if (m !== undefined || k !== undefined) throw fail('conflict');
+                    noProtectionRecords(tx, () =>
                       writeRow(
                         tx,
                         'markers',
@@ -368,9 +393,10 @@ export const browserClientCustody = (input: BrowserClientCustodyOptions) => {
                         intent,
                         (x) => marker(x)!,
                         () => done(undefined)
-                      );
-                    })
-                  )
+                      )
+                    );
+                  })
+                )
               );
               const k = yield* native(() =>
                 generate({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
@@ -466,82 +492,86 @@ export const browserClientCustody = (input: BrowserClientCustodyOptions) => {
                         done(wrapped(v, purpose, digest))
                       )
                   );
+                  yield* available(yield* read());
                   const nonce = firstRead === null ? random(new Uint8Array(12)) : undefined;
                   const nonceId = nonce ? id + '/' + hex(nonce) : undefined;
-                  const state = yield* db.run<{
-                    row: typeof Wrapped.Type;
-                    fresh: boolean;
-                    key: CryptoKey;
-                    marker: NonNullable<ReturnType<typeof marker>>;
-                  }>(
-                    'ClientKeyCustody',
-                    ['data', 'nonces', 'keys', 'markers'],
-                    'readwrite',
-                    (tx, done) =>
-                      tx.request(tx.store('markers').get(id), (m) =>
-                        tx.request(tx.store('keys').get(id), (kv) => {
-                          const mr = marker(m),
-                            k = key(kv);
-                          if (!mr || mr.phase !== 'available' || !k)
-                            throw fail(
-                              mr?.phase === 'creating' ? 'indeterminate' : 'identity-lost'
-                            );
-                          tx.request(tx.store('data').get(slot), (v) => {
-                            const prior = wrapped(v, purpose, digest);
-                            if (prior) {
-                              done({ row: prior, fresh: false, key: k, marker: mr });
-                              return;
-                            }
-                            if (!nonce || !nonceId) throw fail('indeterminate');
-                            const row = {
-                              version: 1 as const,
-                              binding: b,
-                              purpose,
-                              digest,
-                              nonce,
-                              blob: null,
-                            };
-                            reserveNonce(tx, mr, nonce, (updated) =>
-                              writeRow(
-                                tx,
-                                'data',
-                                slot,
-                                row,
-                                (x) => wrapped(x, purpose, digest)!,
-                                (r) => done({ row: r, fresh: true, key: k, marker: updated })
-                              )
-                            );
-                          });
-                        })
-                      )
-                  );
-                  yield* available({ marker: state.marker, key: state.key });
-                  if (state.row.blob) return new Uint8Array(state.row.blob);
-                  let cipher = pending.get(slot);
-                  if (!cipher) {
-                    // Only this operation's freshly reserved nonce may start encryption. A reopened incomplete intent is unknown.
-                    if (!state.fresh) return yield* fail('indeterminate');
-                    const out = yield* native(
-                      async () =>
-                        new Uint8Array(
-                          await encrypt(
-                            {
-                              name: 'AES-GCM',
-                              iv: new Uint8Array(state.row.nonce),
-                              additionalData: aad(options.binding, purpose),
-                              tagLength: 128,
-                            },
-                            state.key,
-                            body
+                  // After intent commit, finish native settlement and ciphertext retention even on interruption.
+                  return yield* Effect.uninterruptible(
+                    Effect.gen(function* () {
+                      const state = yield* db.run<{
+                        row: typeof Wrapped.Type;
+                        fresh: boolean;
+                        key: CryptoKey;
+                      }>(
+                        'ClientKeyCustody',
+                        ['data', 'nonces', 'keys', 'markers'],
+                        'readwrite',
+                        (tx, done) =>
+                          tx.request(tx.store('markers').get(id), (m) =>
+                            tx.request(tx.store('keys').get(id), (kv) => {
+                              const mr = marker(m),
+                                k = key(kv);
+                              if (!mr || mr.phase !== 'available' || !k)
+                                throw fail(
+                                  mr?.phase === 'creating' ? 'indeterminate' : 'identity-lost'
+                                );
+                              tx.request(tx.store('data').get(slot), (v) => {
+                                const prior = wrapped(v, purpose, digest);
+                                if (prior) {
+                                  done({ row: prior, fresh: false, key: k });
+                                  return;
+                                }
+                                if (!nonce || !nonceId) throw fail('indeterminate');
+                                const row = {
+                                  version: 1 as const,
+                                  binding: b,
+                                  purpose,
+                                  digest,
+                                  nonce,
+                                  blob: null,
+                                };
+                                reserveNonce(tx, mr, nonce, () =>
+                                  writeRow(
+                                    tx,
+                                    'data',
+                                    slot,
+                                    row,
+                                    (x) => wrapped(x, purpose, digest)!,
+                                    (r) => done({ row: r, fresh: true, key: k })
+                                  )
+                                );
+                              });
+                            })
                           )
-                        )
-                    );
-                    cipher = new Uint8Array([1, ...state.row.nonce, ...out]);
-                    pending.set(slot, cipher);
-                  }
-                  const saved = yield* completeWrap(slot, state.row, cipher);
-                  pending.delete(slot);
-                  return saved;
+                      );
+                      if (state.row.blob) return new Uint8Array(state.row.blob);
+                      let cipher = pending.get(slot);
+                      if (!cipher) {
+                        // Only this operation's freshly reserved nonce may start encryption. A reopened incomplete intent is unknown.
+                        if (!state.fresh) return yield* fail('indeterminate');
+                        const out = yield* native(
+                          async () =>
+                            new Uint8Array(
+                              await encrypt(
+                                {
+                                  name: 'AES-GCM',
+                                  iv: new Uint8Array(state.row.nonce),
+                                  additionalData: aad(options.binding, purpose),
+                                  tagLength: 128,
+                                },
+                                state.key,
+                                body
+                              )
+                            )
+                        );
+                        cipher = new Uint8Array([1, ...state.row.nonce, ...out]);
+                        pending.set(slot, cipher);
+                      }
+                      const saved = yield* completeWrap(slot, state.row, cipher);
+                      pending.delete(slot);
+                      return saved;
+                    })
+                  );
                 }),
               (body) => Effect.sync(() => body.fill(0))
             )
