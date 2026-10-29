@@ -414,6 +414,11 @@ jobs:
       - name: Verify persisted KEK, installation recovery, journals and exclusion
         run: pnpm --filter @lody/e2ee-core test:browser-custody
 
+      - name: Build shared RPC schema dependencies
+        run: |
+          pnpm --filter acp-extension-core build
+          pnpm --filter acp-extension-dsh build
+
       - name: Verify portable personal host and immutable client originals
         run: pnpm --filter @lody/e2ee-client test:browser
 
