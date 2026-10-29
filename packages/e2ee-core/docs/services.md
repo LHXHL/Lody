@@ -145,7 +145,15 @@ device/installation ID. Custody then captures that complete ClientCustodyBinding
 and must authenticate it before use. Store the receipt in one scope slot, so a
 competing tab with another installation ID conflicts instead of creating a second
 identity. The store atomically advances revision and first wrapped identity
-originals; it does not perform crypto or confer approval.
+originals; it does not perform crypto or confer approval. Ordinary compareAndSet
+never changes identity. After verified new desktop approval and old-identity drain,
+replace compares the full retired binding/revision and atomically archives that
+receipt while selecting a protected fresh identity at revision+1. readRetired
+retrieves exact old receipts; no old journal, trust pin or wrapper is deleted or
+relabelled. prepareReplacement checks/copies a pure write plan; the adapter still
+owns the transaction, readback, archive uniqueness and exact-retry reconciliation.
+The pending pairing journal owns the wrapped candidate and exact approval request
+before the current pointer changes.
 
 ClientKeyCustody exposes status/create/wrap/unwrap/delete only. status never creates
 keys. create follows durable preparation and explicit pairing consent; it never
@@ -154,7 +162,8 @@ complete scope and the closed key purpose. Web persists a non-extractable AES-GC
 KEK; native clients keep that capability in a device-bound protector. Native
 settlement must finish before releasing borrowed buffers or writer ownership.
 Missing protection blocks encrypted opening; loss or ambiguity preserves originals
-and requires exact reconciliation or desktop reapproval. Scope close, ordinary
+and requires exact reconciliation or desktop reapproval followed by explicit
+replacement, never a cleared slot or new namespace. Scope close, ordinary
 cache cleanup and logout retain identities; deletion is reserved for explicit
 scoped hard reset or authenticated terminal removal after drain.
 
@@ -163,6 +172,11 @@ key/snapshot journals keep their responsibilities. This contract adds no key-exp
 file-access or verifier hook. Browser crypto/IDB adapters and portable host/runtime
 consumers require separate implementation and platform acceptance. Existing desktop
 and CLI APIs remain unchanged.
+
+Shared local-wrapping v1 bytes and all CLIENT_KEY_PURPOSES are pinned by
+[test/client-custody-vector.json](../test/client-custody-vector.json), checked with
+independent CBOR generation, the pinned DAG-CBOR codec, WebCrypto and noble.
+These are synthetic compatibility checks, not native custody or IDB acceptance.
 
 ## Application ports
 

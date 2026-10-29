@@ -60,19 +60,33 @@ store 先捕获该路由范围再读取；保留回执标识要打开保护并�
 | prepared | 只核对同一安装的创建，原密钥只包装一次；原生结果未知则保持未决。 |
 | protected | 读回 KEK 与精确包装，解包并验证签名/加密密钥对，再原子标为 ready。 |
 | ready | 仅表示本地保管可用；host 仍须分别验证桌面接纳、凭证、当前成员/设备和获准 epoch，才能开放 runtime。 |
-| retired | 拒绝重开该安装。显式桌面重新审批安装独立身份，不覆盖未决原件。 |
+| retired | 拒绝重开该安装。显式桌面重新审批后，replace 在同一位置原子归档精确旧回执并选择受保护的新身份，保留未决原件。 |
 | 任一侧缺失、重装、损坏或状态不明 | 保留原件，仅以完整保留证据核对同一操作；否则要求桌面重新审批，不续用残余钥匙，不生成身份覆盖。 |
 
 安装事务原子保存包装与回执并读回自身写入，不跨 crypto/网络 await。OS/原生 KEK
 创建与应用存储是两个事务：先保存意图，每侧实际结束后读回；超时不能证明成功或缺失。
 ready 回执是未受信本地数据；重开须重新解包并验证密钥绑定。
 
+替换是显式操作，不是普通 CAS，也不新开命名空间。host 在联网/审批前，用既有待配对
+journal 保留新候选的包装密钥和精确请求。候选 custody 可以保护这些材料，但不选择
+当前身份。独立验证新的桌面批准、排空旧安装后，先退休旧回执，再调用
+`replace({binding: oldBinding, revision: oldRevision}, next)`。
+事务核对完整旧绑定/revision，原样保留退休回执，并选择 device/installationId 都新的
+next，phase 为 protected，revision 为 oldRevision+1。拒绝复用任何已归档身份；
+不重置 revision、不覆盖归档、不清退休记录制造缺失。普通 CAS 仍不能换身份。
+提交前读回两份写入；abort/配额失败均保持原状。精确重试可确认相同归档/当前记录对；
+其他结果冲突，通过 `read` 与 `readRetired(oldBinding)` 核对。实际解包/密钥对读回后
+才可 ready。共享 `prepareReplacement` 只校验并复制写入计划，不代表批准或持久化；
+适配器仍负责原子事务及归档唯一性。待决提交/密钥 journal 保持原身份，账本信任 pin
+保持不变；替换不重新标记、删除或重签原件。
+旧包装即使不可用也原样保留，不修复，也不要求先解包才能执行获准替换；仅新身份可进入 ready。
+
 | 原件 | 持久化与完成的负责人 |
 | --- | --- |
 | 配对请求、审批/claim 凭证及签名提交 | 个人设备 host 在联网前保留第一份精确请求/CBOR 与稳定 ID，完成沿用既有提交回执/确认规则。 |
 | 已验证账本字节、head/count 和游标 | 既有 feed/pin 端口在推进检查点前持久化；重放验证钉住的连续历史。保存的标签不授予权限。 |
 | 入站信封、安装报告、distribution/repair/outbox/snapshot 工作 | 既有 core journal 在联网或推进游标前保留原密文、签名及任务状态；结果未知重试相同字节，不重签、不换 parent。 |
-| 包装身份与本地安装回执 | ClientInstallationStore 以 revision/CAS 保留同一安装及第一份包装；ClientKeyCustody 拥有保护与原生操作生命周期，不决定批准。 |
+| 包装身份与本地安装回执 | ClientInstallationStore 保留一个当前指针和不可变退休回执。普通 revision/CAS 保留同一安装；批准后的原子 replace 切换身份并保留旧包装/journal。ClientKeyCustody 拥有保护与原生操作生命周期，不决定批准。 |
 
 关闭时先拒绝新操作，等待实际工作结束，再释放所有权和自有缓冲。晚到回调不能复活
 已退役 runtime。普通清缓存、logout 和 scope 关闭保留身份及未决原件；hard reset
@@ -94,7 +108,16 @@ ready 回执是未受信本地数据；重开须重新解包并验证密钥绑�
 密钥不单独构成拒开条件。各操作保留现有权限、epoch/generation 检查。普通本地工作区
 保持行为；不支持的通道不得静默进入明文路径。
 
-本次只定义端口和编译期消费者。浏览器跨进程 KEK 持久化、真实 IDB abort/配额/CAS、
+[共享固定向量](../../packages/e2ee-core/test/client-custody-vector.json)固定全部五种用途、
+NUL 结尾 domain、规范文本/字节串 AAD 和本地版本 1 包装字节，KEK/nonce/载荷均为公开
+合成输入。独立生成器使用另一份最小 CBOR 编码器与 OpenSSL；测试核对锁定的 DAG-CBOR
+库、WebCrypto 和 noble AES-GCM，并拒绝绑定/用途调换。原生适配器使用同一 JSON 字节。
+本地 AAD 不得扩展刻意不含文本的账本受限 CBOR 子集。
+公开合成 KEK 在原生单元测试内部使用；这些向量不授权增加生产 KEK 导入/导出或插件
+测试能力。
+
+本次定义端口、纯替换计划器和固定向量检查，不实现持久安装 store。
+浏览器跨进程 KEK 持久化、真实 IDB abort/配额/CAS、
 曲线/HPKE 字节互通、可移植 host/runtime 组合、原生首次解锁/重装及最低 OS 真机验收
 均须后续实现证据，不表示已部署。
 

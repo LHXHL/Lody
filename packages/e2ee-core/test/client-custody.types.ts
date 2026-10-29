@@ -23,6 +23,13 @@ export function clientCustodyConsumer(
   const remove = custody.delete();
   void initialize;
   void remove;
+  const replaceAfterDesktopApproval = store.replace(
+    { revision: original.revision, binding: original.binding },
+    original
+  );
+  const retainedOldReceipt = store.readRetired(original.binding);
+  void replaceAfterDesktopApproval;
+  void retainedOldReceipt;
   const read = Effect.gen(function* () {
     const protector = yield* ClientKeyCustody;
     const installations = yield* ClientInstallationStore;
@@ -47,6 +54,8 @@ export function clientCustodyConsumer(
   custody.delete(binding);
   // @ts-expect-error A retained installation requires a revision precondition.
   store.compareAndSet(original);
+  // @ts-expect-error Replacement requires both revision and full old incarnation.
+  store.replace({ revision: original.revision }, original);
   // @ts-expect-error A server label cannot replace the independently pinned genesis.
   const untrustedBinding: ClientCustodyBinding = { ...binding, genesis: 'server-genesis' };
   void untrustedBinding;

@@ -72,7 +72,7 @@ a conflict, never an empty slot. Store revisions are CAS preconditions, not trus
 | prepared | Reconcile creation for this exact incarnation; protect the original keys once. Unknown native results remain unresolved. |
 | protected | Read back the KEK and exact wrappers, unwrap and verify the signing/encryption key pairs, then atomically mark ready. |
 | ready | Local custody is usable; host must separately verify desktop admission, credential, current membership/device and permitted epochs before runtime access. |
-| retired | Refuse reopening this incarnation. An explicit new desktop approval installs an independent identity without overwriting unresolved originals. |
+| retired | Refuse reopening this incarnation. After explicit new desktop approval, replace atomically archives this exact receipt and selects a protected independent identity in the same slot, preserving unresolved originals. |
 | Missing half, reinstall, corrupt or uncertain state | Preserve originals; reconcile only with the exact retained evidence. Otherwise require desktop reapproval; never reuse residual keys or generate an identity over them. |
 
 An installation transaction atomically stores its wrappers and receipt and reads
@@ -81,12 +81,33 @@ and app storage are separate transactions: persist intent first, read back after
 each side settles, and never infer success or absence from a timeout. A ready
 receipt is untrusted local data; reopen repeats unwrap/key binding verification.
 
+Replacement is explicit, not ordinary CAS or a fresh namespace. The host retains
+the new candidate's wrapped keys and exact pairing request in its existing pending
+pairing journal before network/approval. Candidate custody may protect these
+materials, but cannot select the current identity. After independently verifying
+the new desktop approval and draining the old incarnation, retire the old receipt
+and call `replace({binding: oldBinding, revision: oldRevision}, next)`.
+The transaction compares the complete old binding/revision, retains that retired
+receipt without modification, and selects `next` with fresh device/installationId,
+phase protected and revision oldRevision+1. Reject any archived identity reuse;
+never reset revisions, overwrite an archive or clear retired state to create
+absence. Ordinary CAS still cannot change identity. Read back both writes before
+commit; abort/quota changes neither. An exact retry may acknowledge the same
+archive/current pair; other outcomes conflict and reconcile with `read` plus
+`readRetired(oldBinding)`. Only actual unwrap/key-pair readback permits ready.
+The shared `prepareReplacement` helper checks and copies a write plan, not approval
+or persistence; adapters still own the atomic transaction and archive uniqueness.
+Keep pending submissions/key journals under their original identity, and preserve
+ledger trust pins. Replacement never relabels, deletes or re-signs those originals.
+An unusable old wrapper is retained verbatim, not repaired or required to decrypt
+before approved replacement; only the incoming identity is eligible for ready.
+
 | Original | Persistence and completion owner |
 | --- | --- |
 | Pairing request, approval/claim credential and signed submission | Personal-device host retains the first exact request/CBOR and stable IDs before network; existing submission receipt/acknowledgement rules govern completion. |
 | Verified ledger bytes, head/count and cursor | Existing feed/pin ports persist before advancing a checkpoint; replay validates the pinned continuation. A saved label is no authority. |
 | Incoming envelope, installation report, distribution/repair/outbox/snapshot work | Existing core journals retain original ciphertext, signatures and task state before network or cursor advancement. Unknown results retry the same bytes, never re-sign or rebase. |
-| Wrapped identity and local installation receipt | ClientInstallationStore retains one incarnation and first wrappers by revision/CAS. ClientKeyCustody owns protection and native settlement, never approval. |
+| Wrapped identity and local installation receipt | ClientInstallationStore retains one current pointer and immutable retired receipts. Ordinary revision/CAS preserves an incarnation; post-approval atomic replace switches it while retaining old wrappers and journals. ClientKeyCustody owns protection and native settlement, never approval. |
 
 On close stop new operations, drain actual work, then release ownership and owned
 buffers. A late callback cannot revive a retired runtime. Ordinary cache cleanup,
@@ -113,7 +134,18 @@ is not a refusal when an admitted retained epoch is usable. Every operation keep
 existing permissions and epoch/generation checks. Ordinary local workspaces retain
 their behavior; no unsupported channel may silently enter a plaintext path.
 
-This change defines ports and compile-time consumers only. Browser cross-process
+The [shared fixed vectors](../../packages/e2ee-core/test/client-custody-vector.json)
+pin all five purpose strings, the NUL-terminated domain, canonical text/byte-string
+AAD and local version-1 wrapper bytes with public synthetic KEK/nonce/payloads.
+The standalone generator uses a separate minimal CBOR encoder and OpenSSL; tests
+check the pinned DAG-CBOR codec, WebCrypto and noble AES-GCM, including binding and
+purpose substitution. Native adapters consume these same JSON bytes. Do not widen
+the ledger's bounded CBOR subset, which intentionally omits text, to encode local AAD.
+Exercise the public synthetic KEK inside native unit tests; these vectors authorize
+no production KEK import/export or additional plugin testing capability.
+
+This change defines ports, a pure replacement planner and fixed-vector checks.
+It does not implement a durable installation store. Browser cross-process
 KEK persistence, real IDB abort/quota/CAS, curve/HPKE byte equivalence, portable host
 and runtime composition, native first unlock/reinstall and minimum-OS device
 acceptance remain separate implementation evidence. No deployment is established.

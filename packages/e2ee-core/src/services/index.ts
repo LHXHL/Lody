@@ -73,6 +73,7 @@ export {
   ClientCustodyError,
   ClientKeyCustody,
   ClientInstallationStore,
+  CLIENT_KEY_PURPOSES,
   type ClientCustodyBinding,
   type ClientCustodyScope,
   type ClientCustodyStatus,
