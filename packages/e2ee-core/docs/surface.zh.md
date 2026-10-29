@@ -35,6 +35,7 @@
 | 恢复     | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
 | 客户端保管 | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore` |
+| 配对原件 | `ClientPairingPurpose`, `ClientPairingKey`, `ClientPairingOriginal`, `ClientPairingOriginalStore` |
 
 ## `@lody/e2ee-core/protocol` — 纯协议
 
@@ -125,3 +126,7 @@ genesis、公钥 AAD 完全匹配的当前 v1 原件才能重开。属于其他�
 ## `@lody/e2ee-core/adapters/browser-crypto`
 
 `importBrowserDevice`, `BrowserDevice`.
+
+## `@lody/e2ee-core/adapters/indexeddb`
+
+`indexedDbClientStores`, `IndexedDbStoreOptions`.

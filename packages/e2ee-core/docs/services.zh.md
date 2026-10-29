@@ -26,15 +26,16 @@
 | [`EpochPublicationSource`](#epochpublicationsource) | 应用 | 查找当前纪元的发布记录 | `KeyDistributor` |
 | [`LedgerSync`](#ledgersync) | 应用 | 你的 feed 同步（`LedgerFeedSource` 分页 → `LedgerFeed.accept`，检查点独立选择） | `WorkspaceControl`、`E2eeWorkspace` |
 | `RecoveryVaultLocalStore` | 本地存储 | 支持比较并交换的本地键值存储 | `RecoveryVaults` |
-| `LedgerPinStore` | 本地存储 | `sqliteLedgerPinStore` | `VerifiedLedger` |
-| `LedgerFeedStore` | 本地存储 | `sqliteLedgerFeedStore` | `LedgerFeed` |
+| `LedgerPinStore` | 本地存储 | `sqliteLedgerPinStore` 或 `indexedDbClientStores` | `VerifiedLedger` |
+| `LedgerFeedStore` | 本地存储 | `sqliteLedgerFeedStore` 或 `indexedDbClientStores` | `LedgerFeed` |
 | `InstalledKeyStore` | 本地存储 | `sqliteInstalledKeyStore` | `InstalledEpochKeys` |
 | `ReceiveJournal` | 本地存储 | `sqliteReceiveJournal` | `KeyReceiver` |
 | `RepairJournal` | 本地存储 | `sqliteRepairJournal` | `KeyRepair` |
 | `DistributionJournal` | 本地存储 | `sqliteDistributionJournal` | `KeyDistributor` |
 | `DeliveryOutbox` | 本地存储 | `sqliteDeliveryOutbox` | `KeyDistributor` |
 | `EpochCandidateStore` | 本地存储 | `sqliteEpochCandidateStore` | `EpochPublisher` |
-| `SubmissionJournal` | 本地存储 | `sqliteSubmissionJournal` | `LedgerSubmission` |
+| `SubmissionJournal` | 本地存储 | `sqliteSubmissionJournal` 或 `indexedDbClientStores` | `LedgerSubmission` |
+| `ClientPairingOriginalStore` | 本地存储 | `indexedDbClientStores` | 客户端宿主 |
 
 `sqliteLocalStores({ directory, mode })` 一次提供全部本地存储端口，每个存储一个文件。除非平台没有 Node SQLite，否则直接用它。
 
@@ -113,8 +114,8 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 缓存与 logout 保留身份；仅显式限定 hard reset 或排空后的已认证终端移除可删除。
 
 既有 identity、installed/candidate protector、账本/提交 store 及密钥/快照 journal
-保留原责任。本合同不新增密钥导出、文件访问或验签钩子。浏览器 crypto/IDB 适配器与
-可移植 host/runtime 消费者须另行实现和平台验收，既有桌面/CLI API 不变。
+保留原责任。本合同不新增密钥导出、文件访问或验签钩子。可选浏览器 crypto/IDB 适配器不启用可移植 host/runtime；
+custody 与消费者组合仍需实现及平台验收，既有桌面/CLI API 不变。
 
 共享本地包装 v1 字节及全部 CLIENT_KEY_PURPOSES 由
 [test/client-custody-vector.json](../test/client-custody-vector.json)固定，使用独立 CBOR
@@ -153,7 +154,7 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 - 存储不做任何决定：读出的行由对应流程重新校验，任何已存字节都不授予权限。
 - 日志会保留原始内容和结果，直到应用确认；不会自动删除。
 
-如需存到别处（IndexedDB、移动端数据库等），在该存储上以相同的原子性实现这些端口；`src/adapters/node-sqlite` 中的 SQLite 适配器是参考实现。
+其他存储需要以相同的原子性实现这些端口；`src/adapters/node-sqlite` 中的 SQLite 适配器是参考实现。
 
 ## 可以替换的内部部件
 
@@ -180,3 +181,38 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 句柄仅在当前 isolate 内供 core HPKE 使用，不能导出、structured-clone 或交给原生
 WebCrypto。close 立即拒绝新操作，等待已准入 HPKE 真正完成后清理私钥；Scope
 释放会自动 close。此适配不提供持久保护、设备批准或主机准入。
+
+## 浏览器账本与原件存储
+
+`@lody/e2ee-core/adapters/indexeddb` 的 `indexedDbClientStores` 提供
+`LedgerPinStore`、`LedgerFeedStore`、`SubmissionJournal` 与
+`ClientPairingOriginalStore`。提供 `WorkspaceScope`、稳定的 `databaseName`、
+`accountId`、`workspaceId` 和显式 mode。仅首次配置使用 `create-or-open`；
+返回的安装使用 `open-existing`，存储不存在时阻塞。换设备、logout 或普通清缓存
+都保留同一个数据库路由，避免丢弃回滚 pin。
+
+本地 schema 为版本 1，与账本 v1 无关。每笔事务都校验捕获的账号、工作区与
+独立钉住的 genesis。原生请求仅在短同步回调中串联，不跨 crypto/network await。
+写入读回行与绑定，申请 strict durability（浏览器提示），仅在 `complete` 后报告成功。
+abort/配额失败同时回滚记录与游标。rebase 删除已覆盖记录之前，在同一 readwrite
+事务内遍历整个后缀，要求连续整数键、有界字节数组记录，以及准确的条数/字节总量；
+额外、缺失或非法行均中止，不改变起点、游标或任何原件。Scope 关闭立即拒绝新操作，
+并等待已进入的事务；
+存储不可用、缺 sentinel、未知 schema 或损坏不能转用内存 fallback 或重置旧状态。
+
+pin 读取捕获该 owner 的 CAS revision；每个 Layer 只装配一个顺序执行的
+`VerifiedLedger`，不同 tab 使用独立 token。冲突后重新读取并由流程检查续接关系。
+feed 字节不可信：宿主重新验证后缀，或用独立保留的 endpoint/digest 限定自己的
+retained export；存储行不能创建可信视图。
+
+配对位置还绑定本地设备、安装、16 字节 session 与 request/approval/claim 用途，
+保留首份原件与首份不可信回执。完全相同的重试不写新值，改变字节或 revision 则冲突。
+宿主在入库前保护秘密材料，恢复时重新验签、检查当前准入并解释回执。
+store 不授予审批权限，不提供网络或删除方法。分页最多 64 条、32 MiB；
+logout 和安装替换保留旧交换。Receive/key/outbox、repair、snapshot journal
+由独立的 custody 层提供。
+
+`test:browser-idb` 无外部导入地打包，在 Chromium/WebKit 持久 profile 中覆盖重启、
+双 tab 竞争、未知结果、原生事务故障及关闭。这是浏览器引擎证据；strict durability 仅为提示，
+WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器或用户不会清除存储；
+持久身份保护丢失仍由宿主按已批准 custody 合同处理。

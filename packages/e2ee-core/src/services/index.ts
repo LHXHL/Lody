@@ -92,3 +92,10 @@ export type { MailboxSlot } from '../internal/keys/reports';
 export type { EpochStagedGroup, EpochStagedGroupKey } from '../internal/keys/staging';
 export type { LedgerFeedState } from '../internal/ledger/feed-page';
 export type { VaultCiphertext } from '../internal/recovery/crypto';
+
+export {
+  ClientPairingOriginalStore,
+  type ClientPairingKey,
+  type ClientPairingOriginal,
+  type ClientPairingPurpose,
+} from './client-pairing';

@@ -41,6 +41,7 @@ repository's tests and the Lab, with no compatibility promise.
 | Recovery      | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
 | Client custody | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore` |
+| Pairing originals | `ClientPairingPurpose`, `ClientPairingKey`, `ClientPairingOriginal`, `ClientPairingOriginalStore` |
 
 ## `@lody/e2ee-core/protocol` — pure protocol
 
@@ -137,3 +138,7 @@ custody; ordinary retry grants no replacement authority.
 ## `@lody/e2ee-core/adapters/browser-crypto`
 
 `importBrowserDevice`, `BrowserDevice`.
+
+## `@lody/e2ee-core/adapters/indexeddb`
+
+`indexedDbClientStores`, `IndexedDbStoreOptions`.

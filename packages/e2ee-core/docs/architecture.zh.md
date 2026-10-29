@@ -106,3 +106,13 @@ X25519 KEM。seal 无需原生 X25519；原生收件人句柄继续走原路径�
 `test:browser-crypto` 面向 Safari 16.4 打包，要求无外部导入，并在禁用原生曲线和
 WASM 的 Chromium/WebKit 执行。独立 CI 任务安装两个引擎，普通单测无需浏览器。
 这是桌面浏览器引擎兼容证据，不是最低 OS 真机或持久保管验收。
+
+## IndexedDB 所有权
+
+可选 IDB 适配器持有 Scope 内的一条连接和短原生事务，不另建验证缓存。
+账号/工作区/genesis 数据库在身份替换后保留；配对位置额外绑定设备/安装。
+retained 起点由既有账本流程限定后才能使用。请求 strict durability，
+以事务 complete 作为可观察提交边界。关闭先拒绝新调用，再等待真实事务 Promise，
+延迟 open 回调不能复活旧 owner；任何事务都不等待 crypto/network。
+[服务说明](services.zh.md#浏览器账本与原件存储)解释路由、CAS 与原件保留，
+归属架构 note 说明为何拒绝换设备就重建数据库。

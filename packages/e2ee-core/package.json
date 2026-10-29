@@ -13,7 +13,8 @@
     "./adapters/loro-streams": "./src/adapters/loro-streams/index.ts",
     "./cloudflare": "./src/cloudflare/index.ts",
     "./internal": "./src/internal/index.ts",
-    "./adapters/browser-crypto": "./src/adapters/browser-crypto/index.ts"
+    "./adapters/browser-crypto": "./src/adapters/browser-crypto/index.ts",
+    "./adapters/indexeddb": "./src/adapters/indexeddb/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -21,7 +22,8 @@
     "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.ts'",
     "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.ts'",
     "check:docs": "tsx scripts/check-public-docs.ts",
-    "test:browser-crypto": "vitest run --config vitest.browser.config.ts"
+    "test:browser-crypto": "vitest run --config vitest.browser.config.ts",
+    "test:browser-idb": "vitest run --config vitest.idb.config.ts"
   },
   "dependencies": {
     "@hpke/chacha20poly1305": "1.8.0",
