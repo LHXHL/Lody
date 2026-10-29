@@ -97,6 +97,50 @@ async function mutate(
   );
 }
 
+async function rawFeed(page: Page, databaseName: string) {
+  return page.evaluate(
+    (name) =>
+      new Promise((resolve, reject) => {
+        const opening = indexedDB.open(name, 1);
+        opening.onerror = () => reject(opening.error);
+        opening.onsuccess = () => {
+          const db = opening.result,
+            tx = db.transaction(['feed', 'records'], 'readonly');
+          let feed: unknown;
+          const entries: unknown[] = [];
+          const metadata = tx.objectStore('feed').get(0);
+          metadata.onsuccess = () => {
+            const r = metadata.result;
+            feed = {
+              ...r,
+              origin: Array.from(r.origin),
+              tail: { ...r.tail, head: Array.from(r.tail.head) },
+            };
+          };
+          const rows = tx.objectStore('records').openCursor();
+          rows.onsuccess = () => {
+            const c = rows.result;
+            if (!c) return;
+            entries.push({
+              key: c.key,
+              value: c.value instanceof Uint8Array ? Array.from(c.value) : c.value,
+            });
+            c.continue();
+          };
+          tx.oncomplete = () => {
+            db.close();
+            resolve({ feed, entries });
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+      }),
+    databaseName
+  );
+}
+
 it.each(['chromium', 'webkit'] as const)(
   'preserves exact originals and CAS across real %s profiles, tabs and faults',
   async (engine) => {
@@ -357,6 +401,65 @@ it.each(['chromium', 'webkit'] as const)(
         head: vector.records[1]!.hash,
         length: 2,
       });
+      await stop(page);
+      // Rebase must reject the same corrupt suffix that load rejects, retaining every byte.
+      for (const fault of [
+        'fraction-extra',
+        'fraction-replace',
+        'missing',
+        'record-shape',
+        'byte-total',
+      ] as const) {
+        const name = 'covered-rebase-' + fault;
+        await boot(page, name);
+        for (const action of ['initialize', 'append', 'appendThird'])
+          expect((await api(page, action)).ok).toBe(true);
+        await stop(page);
+        await page.evaluate(
+          ({ databaseName, change }) =>
+            new Promise<void>((resolve, reject) => {
+              const opening = indexedDB.open(databaseName, 1);
+              opening.onerror = () => reject(opening.error);
+              opening.onsuccess = () => {
+                const db = opening.result,
+                  tx = db.transaction('records', 'readwrite'),
+                  store = tx.objectStore('records');
+                const read = store.get(2);
+                read.onsuccess = () => {
+                  if (change === 'fraction-extra') store.put(read.result, 2.5);
+                  else if (change === 'fraction-replace') {
+                    store.delete(2);
+                    store.put(read.result, 2.5);
+                  } else if (change === 'missing') store.delete(2);
+                  else if (change === 'record-shape') store.put({ invalid: true }, 2);
+                  else store.put(Uint8Array.from([...read.result, 73]), 2);
+                };
+                tx.oncomplete = () => {
+                  db.close();
+                  resolve();
+                };
+                tx.onabort = () => {
+                  db.close();
+                  reject(tx.error);
+                };
+              };
+            }),
+          { databaseName: name, change: fault }
+        );
+        const before = await rawFeed(page, name);
+        await boot(page, name, undefined, 'open-existing');
+        expect((await api(page, 'snapshot')).reason, fault).toBe('corrupt');
+        expect((await api(page, 'rebaseThird')).reason, fault).toBe('corrupt');
+        await stop(page);
+        expect(await rawFeed(page, name), fault).toEqual(before);
+      }
+      await boot(page, 'covered-rebase-valid');
+      for (const action of ['initialize', 'append', 'appendThird', 'rebaseThird'])
+        expect((await api(page, action)).ok).toBe(true);
+      const covered = (await api(page, 'snapshot')).value.feed;
+      expect(covered.originCount).toBe(3);
+      expect(covered.tail.count).toBe(3);
+      expect(covered.records).toEqual([]);
       await stop(page);
       // Rebase must retain an unexpected original beyond its CAS endpoint.
       await boot(page, 'orphan-rebase');

@@ -107,6 +107,8 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   installation, session and purpose. No receipt or stored state grants approval.
   Mutations resolve only on transaction completion; close fences new calls and drains
   admitted native transactions. Missing/corrupt existing storage never resets a pin.
+  Rebase validates the entire contiguous suffix, record shape and count/byte totals
+  before deleting covered rows in the same transaction.
 - Tests use fixed synthetic vectors, real SQLite and crypto, explicit signals;
   never captured transcripts, real keychains or private designs.
 - TypeScript Worker fixtures preload `test/worker-loader.mjs` to register tsx

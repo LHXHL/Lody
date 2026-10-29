@@ -194,7 +194,10 @@ WebCrypto。close 立即拒绝新操作，等待已准入 HPKE 真正完成后�
 本地 schema 为版本 1，与账本 v1 无关。每笔事务都校验捕获的账号、工作区与
 独立钉住的 genesis。原生请求仅在短同步回调中串联，不跨 crypto/network await。
 写入读回行与绑定，申请 strict durability（浏览器提示），仅在 `complete` 后报告成功。
-abort/配额失败同时回滚记录与游标。Scope 关闭立即拒绝新操作，并等待已进入的事务；
+abort/配额失败同时回滚记录与游标。rebase 删除已覆盖记录之前，在同一 readwrite
+事务内遍历整个后缀，要求连续整数键、有界字节数组记录，以及准确的条数/字节总量；
+额外、缺失或非法行均中止，不改变起点、游标或任何原件。Scope 关闭立即拒绝新操作，
+并等待已进入的事务；
 存储不可用、缺 sentinel、未知 schema 或损坏不能转用内存 fallback 或重置旧状态。
 
 pin 读取捕获该 owner 的 CAS revision；每个 Layer 只装配一个顺序执行的
@@ -210,5 +213,6 @@ logout 和安装替换保留旧交换。Receive/key/outbox、repair、snapshot j
 由独立的 custody 层提供。
 
 `test:browser-idb` 无外部导入地打包，在 Chromium/WebKit 持久 profile 中覆盖重启、
-双 tab 竞争、未知结果、原生事务故障及关闭。这是浏览器引擎证据，不是真机验收，
-也不保证浏览器或用户不会清除存储；持久身份保护丢失仍由宿主按已批准 custody 合同处理。
+双 tab 竞争、未知结果、原生事务故障及关闭。这是浏览器引擎证据；strict durability 仅为提示，
+WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器或用户不会清除存储；
+持久身份保护丢失仍由宿主按已批准 custody 合同处理。

@@ -275,7 +275,11 @@ workspace and pinned genesis bind every transaction. Native IDB requests stay
 inside short synchronous callbacks: no crypto or network awaits. Writes read
 back their rows and binding, request strict durability (a browser hint), and
 report success only after `complete`. Abort/quota failures roll back both records
-and cursor. Scope close rejects new operations and waits for admitted transactions;
+and cursor. Before rebase deletes covered rows, it scans the entire suffix in the
+same readwrite transaction, requiring consecutive integer keys, bounded byte-array
+records and exact record/byte totals. Extra, missing or malformed rows abort without
+changing the origin, cursor or any original. Scope close rejects new operations
+and waits for admitted transactions;
 errors, unsupported storage, missing sentinels and unknown schema never select an
 in-memory fallback or reset existing state.
 
@@ -296,6 +300,7 @@ repair and snapshot journals belong to the separate custody layer.
 
 `test:browser-idb` bundles without external imports and exercises Chromium/WebKit
 persistent profiles, restarts, competing tabs, unknown results, native transaction
-faults and close. This is browser-engine evidence, not real-device acceptance or
-a guarantee against user/browser eviction; loss of persistent identity protection
+faults and close. This is browser-engine evidence; strict durability is only a hint.
+WebKit tests do not replace iOS 16.4 real-device or power-loss acceptance. There is no
+guarantee against user/browser eviction; loss of persistent identity protection
 must be handled by the host under the approved custody contract.

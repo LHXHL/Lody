@@ -33,13 +33,19 @@ const tail = (index: number) => ({
   bootstrap: false,
   bytes: vector.records.slice(0, index + 1).reduce((total, row) => total + row.hex.length / 2, 0),
 });
-const retained = ok(
-  exportVerifiedState(
-    ok(
-      verifyLedger({ anchor: genesis, records: [record(0), record(1)], checkpoint: checkpoint(1) })
+const retainedAt = (index: number) =>
+  ok(
+    exportVerifiedState(
+      ok(
+        verifyLedger({
+          anchor: genesis,
+          records: vector.records.slice(0, index + 1).map((_, i) => record(i)),
+          checkpoint: checkpoint(index),
+        })
+      )
     )
-  )
-);
+  );
+const retained = retainedAt(1);
 let listCursor: string | null = null;
 const key = {
   accountId: 'synthetic-account',
@@ -112,6 +118,15 @@ export async function invoke(action: string, n = 0) {
             return yield* feed.initialize(record(0), 1, tail(0));
           case 'append':
             return yield* feed.append(tail(0), [record(1)], tail(1));
+          case 'appendThird':
+            return yield* feed.append(tail(1), [record(2)], tail(2));
+          case 'rebaseThird': {
+            const saved = retainedAt(2);
+            return yield* feed.rebase(tail(2), saved.bytes, 3, {
+              ...tail(2),
+              bytes: saved.bytes.length,
+            });
+          }
           case 'appendInvalid':
             return yield* feed.append(tail(1), [record(2)], { ...tail(2), count: 99 });
           case 'rebase':

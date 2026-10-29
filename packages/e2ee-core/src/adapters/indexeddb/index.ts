@@ -245,6 +245,39 @@ function verifiedWrite<A>(
   );
 }
 
+/** Load and destructive rebase must accept exactly the same stored suffix structure. */
+function readSuffix(
+  tx: Transaction,
+  origin: Uint8Array,
+  originCount: number,
+  tail: LedgerFeedTail,
+  accept: ((record: Uint8Array) => void) | undefined,
+  done: () => void
+) {
+  let position = originCount,
+    total = origin.length;
+  tx.request(tx.store('records').openCursor(), (cursor) => {
+    if (!cursor) {
+      if (position !== tail.count || total !== tail.bytes)
+        throw failure('LedgerFeedStore', 'corrupt');
+      done();
+      return;
+    }
+    if (
+      position >= tail.count ||
+      cursor.key !== position + 1 ||
+      !(cursor.value instanceof Uint8Array) ||
+      !blob(cursor.value, 8192)
+    )
+      throw failure('LedgerFeedStore', 'corrupt');
+    position += 1;
+    total += cursor.value.length;
+    if (!integer(total) || total > tail.bytes) throw failure('LedgerFeedStore', 'corrupt');
+    accept?.(cursor.value);
+    cursor.continue();
+  });
+}
+
 /**
  * Account/workspace/genesis-bound IDB ledger/feed/submission and pairing-original
  * ports. Short strict-durability transactions read back writes and resolve only
@@ -392,31 +425,17 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
                   originCount = r.originCount;
                 if (tail.count - originCount > maxRecords)
                   throw failure('LedgerFeedStore', 'capacity');
-                tx.request(tx.store('records').count(), (count) => {
-                  if (count !== tail.count - originCount)
-                    throw failure('LedgerFeedStore', 'corrupt');
-                  const records: Uint8Array[] = [];
-                  let total = origin.length;
-                  const request = tx.store('records').openCursor();
-                  tx.request(request, (cursor) => {
-                    if (!cursor) {
-                      if (total !== tail.bytes) throw failure('LedgerFeedStore', 'corrupt');
-                      done({ origin, originCount, tail, records });
-                      return;
-                    }
-                    if (records.length >= maxRecords) throw failure('LedgerFeedStore', 'capacity');
-                    if (
-                      cursor.key !== originCount + records.length + 1 ||
-                      !(cursor.value instanceof Uint8Array) ||
-                      !blob(cursor.value, 8192)
-                    )
-                      throw failure('LedgerFeedStore', 'corrupt');
-                    records.push(new Uint8Array(cursor.value));
-                    total += cursor.value.length;
-                    if (!integer(total)) throw failure('LedgerFeedStore', 'corrupt');
-                    cursor.continue();
-                  });
-                });
+                const records: Uint8Array[] = [];
+                readSuffix(
+                  tx,
+                  origin,
+                  originCount,
+                  tail,
+                  (value) => {
+                    records.push(new Uint8Array(value));
+                  },
+                  () => done({ origin, originCount, tail, records })
+                );
               })
             );
           }),
@@ -555,12 +574,16 @@ export const indexedDbClientStores = (options: IndexedDbStoreOptions) => {
                       'LedgerFeedStore'
                     );
                   });
-                if (originCount === r.originCount) finish();
-                else
-                  tx.request(
-                    tx.store('records').delete(IDBKeyRange.bound(r.originCount + 1, originCount)),
-                    finish
-                  );
+                // Validate every row before any deletion, under the same readwrite lock.
+                // A count or a numeric range alone misses fractional/extra keys and malformed rows.
+                readSuffix(tx, r.origin, r.originCount, expected, undefined, () => {
+                  if (originCount === r.originCount) finish();
+                  else
+                    tx.request(
+                      tx.store('records').delete(IDBKeyRange.bound(r.originCount + 1, originCount)),
+                      finish
+                    );
+                });
               })
             );
           }),
