@@ -363,7 +363,12 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number; subagentTaskId?: string; cancelId?: string }
+    options?: {
+      timeoutMs?: number;
+      subagentTaskId?: string;
+      cancelId?: string;
+      pauseInbox?: boolean;
+    }
   ) => Promise<SessionCancelResponse | null>;
   requestSessionSteer: (
     machineId: MachineId,

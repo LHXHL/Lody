@@ -701,7 +701,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number; subagentTaskId?: string; cancelId?: string }
+    options?: {
+      timeoutMs?: number;
+      subagentTaskId?: string;
+      cancelId?: string;
+      pauseInbox?: boolean;
+    }
   ): Promise<SessionCancelResponse | null> => {
     try {
       if (
@@ -722,6 +727,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
             turnId,
             subagentTaskId: options?.subagentTaskId,
             ...(options?.cancelId ? { cancelId: options.cancelId } : {}),
+            ...(options?.pauseInbox === undefined ? {} : { pauseInbox: options.pauseInbox }),
           },
           timeoutMs: options?.timeoutMs ?? 2_000,
         });
@@ -744,6 +750,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         turnId,
         subagentTaskId: options?.subagentTaskId,
         ...(options?.cancelId ? { cancelId: options.cancelId } : {}),
+        ...(options?.pauseInbox === undefined ? {} : { pauseInbox: options.pauseInbox }),
         timeoutMs: options?.timeoutMs ?? 2_000,
       });
     } catch (error) {
