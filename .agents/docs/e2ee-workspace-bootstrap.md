@@ -48,6 +48,16 @@ History starts at genesis and follows a fixed advertised head/count across pages
 
 Verified history checkpoints are retained per account and workspace, with independent storage keys so concurrent windows cannot overwrite a newer observation. Only a prefix actually verified by the core is recorded. Later pages and refreshes must agree with every retained checkpoint; a failed or incomplete refresh keeps the previous history visible and never accepts a shorter or conflicting chain.
 
+A personal-device invitation can start the native runtime at snapshot `m` after the
+control page already observed `n < m`. The compact snapshot has no hashes for that
+prefix. Main requests the missing public history outside the account lock; the host
+replays its signed originals from the retained genesis, checks the snapshot head,
+count and complete-state digest, and proves the older checkpoint before retaining
+those originals. Only then may an older native pin advance to the snapshot. Reopening
+uses that retained proof offline. A missing proof requests history; a conflicting
+proof remains `local-evidence-conflict`. Neither case resets identity or checkpoints,
+and bridging does not change the runtime view's endorsed-snapshot provenance.
+
 A locally pinned genesis is independent of the history response. A device without that pin is explicitly shown a server-anchored verification state; a valid signature alone cannot prove it received the intended organization's genesis. The history page does not claim a new device is enrolled.
 
 A known encrypted mode or genesis pin takes precedence over a later server claim of plaintext. Ordinary cache cleanup must preserve these identity records. An authenticated plaintext descriptor is retained per account and workspace ID for later offline startup because mode cannot change in place; a proof saved under an earlier slug still applies and is rewritten under the current slug. After the session is confirmed, the runtime provider also retains proofs for the other listed, not-encrypted workspaces in the background. The control-only encrypted route never constructs the old Repo/execution runtime. Backend admission independently rejects its ordinary Streams, token, sharing and execution routes.

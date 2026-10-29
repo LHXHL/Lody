@@ -1669,41 +1669,79 @@ export class E2eeIpc extends IpcService {
     if (expectedAccountId !== undefined && identity?.userId !== expectedAccountId)
       throw new Error('e2ee_account_mismatch')
     let accountId: string | undefined
-    return withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(
-          function* (this: E2eeIpc) {
-            accountId = owner.accountId
-            const status = yield* owner.host.open(workspaceId, observed)
-            const latest =
-              expectedAccountId === undefined
-                ? undefined
-                : getIpcServiceDeps().authService.getCachedSessionIdentity()
-            if (
-              expectedAccountId !== undefined &&
-              (latest?.userId !== expectedAccountId || latest?.generation !== identity?.generation)
-            )
-              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-            const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
-            readers.set(id, (readers.get(id) ?? 0) + 1)
-            owner.readers.set(workspaceId, readers)
-            return expectedAccountId === undefined
-              ? status
-              : { ...status, readerOwner: this.readerOwner(owner) }
-          }.bind(this)
-        ),
-      workspaceId,
-      false
-    ).catch(async (error) => {
-      if (!(error instanceof Error) || error.message !== 'e2ee_member_removed' || !accountId)
-        throw error
-      await cleanupRemovedDesktopWorkspace({ accountId, workspaceId }).catch((cause) => {
-        this.pairingFailure = cause
-        if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== accountId)
+    let proofIdentity: typeof identity
+    const openLocal = (proof?: readonly E2eeWorkspaceHistoryPage[]) =>
+      withDesktopE2eeAccount(
+        (owner) =>
+          Effect.gen(
+            function* (this: E2eeIpc) {
+              if (accountId !== undefined && owner.accountId !== accountId)
+                return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+              if (proofIdentity) {
+                const current = getIpcServiceDeps().authService.getCachedSessionIdentity()
+                if (
+                  current.userId !== proofIdentity.userId ||
+                  current.generation !== proofIdentity.generation
+                )
+                  return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+              }
+              accountId = owner.accountId
+              const status = yield* owner.host.open(workspaceId, observed, proof)
+              const latest =
+                expectedAccountId === undefined && !proofIdentity
+                  ? undefined
+                  : getIpcServiceDeps().authService.getCachedSessionIdentity()
+              if (
+                expectedAccountId !== undefined &&
+                (latest?.userId !== expectedAccountId ||
+                  latest?.generation !== identity?.generation)
+              )
+                return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+              if (
+                proofIdentity &&
+                (latest?.userId !== proofIdentity.userId ||
+                  latest?.generation !== proofIdentity.generation)
+              )
+                return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+              const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
+              readers.set(id, (readers.get(id) ?? 0) + 1)
+              owner.readers.set(workspaceId, readers)
+              return expectedAccountId === undefined
+                ? status
+                : { ...status, readerOwner: this.readerOwner(owner) }
+            }.bind(this)
+          ),
+        workspaceId,
+        false
+      )
+    // Only a missing pre-snapshot proof requests history. A known conflict never retries.
+    // Network work stays outside the native account lock and grants no reader on failure.
+    return openLocal()
+      .catch(async (error) => {
+        if (!(error instanceof Error) || error.message !== 'e2ee_snapshot-history-required')
+          throw error
+        const auth = getIpcServiceDeps().authService
+        const before = auth.getCachedSessionIdentity()
+        proofIdentity = before
+        const cloud = await desktopE2eeCloudClient()
+        if (cloud.accountId !== accountId || before.userId !== accountId)
           throw new Error('e2ee_account_mismatch')
+        const proof = await this.permissionHistory(workspaceId, cloud)
+        const after = auth.getCachedSessionIdentity()
+        if (after.userId !== before.userId || after.generation !== before.generation)
+          throw new Error('e2ee_account_mismatch')
+        return openLocal(proof)
       })
-      throw error
-    })
+      .catch(async (error) => {
+        if (!(error instanceof Error) || error.message !== 'e2ee_member_removed' || !accountId)
+          throw error
+        await cleanupRemovedDesktopWorkspace({ accountId, workspaceId }).catch((cause) => {
+          this.pairingFailure = cause
+          if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== accountId)
+            throw new Error('e2ee_account_mismatch')
+        })
+        throw error
+      })
   }
   @IpcMethod()
   async close(workspaceId: string, expectedAccountId?: string, readerOwner?: string) {
