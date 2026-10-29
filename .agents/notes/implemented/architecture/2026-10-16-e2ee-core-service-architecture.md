@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2053)
 
 [中文](2026-10-16-e2ee-core-service-architecture.zh.md)
 
