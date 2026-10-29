@@ -14,7 +14,11 @@ import {
   type E2eeLocalDataIdentity,
   type E2eeLocalDataScope,
 } from '@/lib/e2ee-local-data';
-import { createDesktopE2eeContent } from './desktop-e2ee-content';
+import {
+  createWorkspaceRuntimeRetirements,
+  type WorkspaceRuntimeResources,
+} from './workspace-runtime-retirements';
+import { createE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -155,7 +159,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
   const token = useAtomValue(authTokenAtom);
   const currentUser = useAtomValue(userAtom);
-  const previousShutdown = useRef<Promise<void>>(Promise.resolve());
+  const retirements = useRef(createWorkspaceRuntimeRetirements());
   const runtime = useAtomValue(runtimeAtom);
   const setRuntime = useSetAtom(runtimeAtom);
   const setRuntimeInitFailure = useSetAtom(workspaceRuntimeInitFailureAtom);
@@ -645,12 +649,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
     let disposal: Promise<void> | null = null;
+    let contentDisposal: Promise<PromiseSettledResult<void | undefined>[]> | undefined;
+    const retirementOwners = retirements.current;
+    let nativeResource: WorkspaceRuntimeResources['native'];
+    let repoResource: WorkspaceRuntimeResources['repo'];
+    const encryptedRuntime = platform.e2eeWorkspaces?.runtime;
     let nativeLease: string | null = null;
-    let nativeHasKey = false;
+    let nativeReaderOwner: string | undefined;
+    let nativeHasUsableKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
     const acceptStatus = async (status: import('@lody/platform').E2eeRuntimeStatus) => {
-      const native = platform.e2eeWorkspaces?.runtime;
+      const native = encryptedRuntime;
       if (!native || !nativeLease || disposed || retired) return;
       const leased = nativeLease;
 
@@ -662,7 +672,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         if (disposed || retired) return;
         if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
       }
-      if (!nativeHasKey && workspaceRuntime === null && status.hasCurrentKey)
+      if (
+        !nativeHasUsableKey &&
+        workspaceRuntime === null &&
+        (status.hasCurrentKey || status.writeEpoch != null)
+      )
         retryAdmission((value) => value + 1);
     };
     const refreshNative = (): void => {
@@ -671,11 +685,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         nativeRefreshAgain = true;
         return;
       }
-      const native = platform.e2eeWorkspaces?.runtime;
+      const native = encryptedRuntime;
       if (!native) return;
       const leased = nativeLease;
       const pending = native
-        .refresh(leased, { installKeys: !nativeHasKey && workspaceRuntime === null })
+        .refresh(leased, { installKeys: !nativeHasUsableKey && workspaceRuntime === null })
         .then(acceptStatus)
         .catch(async (error: unknown) => {
           if (disposed || retired) return;
@@ -704,7 +718,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     window.addEventListener('online', refreshNative);
     const unsubscribeLedgerChange = accountId
       ? subscribeE2eeLedgerChanges(accountId, effectiveWorkspaceId, () => {
-          const native = platform.e2eeWorkspaces?.runtime;
+          const native = encryptedRuntime;
           if (disposed || retired || !native || !nativeLease) return;
           void native
             .status(nativeLease)
@@ -714,24 +728,46 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             });
         })
       : () => {};
-    let encryptedAccess: ReturnType<typeof createDesktopE2eeContent> | null = null;
-    const disposeRuntime = () =>
-      (disposal ??= (async () => {
-        try {
-          await encryptedAccess?.close();
-          if (workspaceRuntime) await workspaceRuntime.dispose();
-        } finally {
-          if (nativeLease) {
-            const leased = nativeLease;
-            nativeLease = null;
-            await platform.e2eeWorkspaces?.runtime?.close(leased).catch(() => {});
-          }
+    let encryptedAccess: ReturnType<typeof createE2eeContent> | null = null;
+    const disposeRuntime = (): Promise<void> => {
+      if (disposal) return disposal;
+      const pending = (async () => {
+        // Fence the native reader while independent renderer cleanup starts.
+        // A stuck native call must reach its bounded close; awaiting the content
+        // bridge first would hide that incomplete result behind the same call.
+        contentDisposal ??= initialization.then(() =>
+          Promise.allSettled([encryptedAccess?.close(), workspaceRuntime?.dispose()])
+        );
+        if (nativeLease) {
+          await encryptedRuntime!.close(nativeLease, accountId!, nativeReaderOwner);
         }
+        await initialization;
+        // Legacy hosts acquire their lease only after open settles. A capable
+        // host was already fenced above; confirm its same pending/actual label.
+        if (nativeLease) await encryptedRuntime!.close(nativeLease, accountId!, nativeReaderOwner);
+        const results = await contentDisposal;
+        const failures = results.flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : []
+        );
+        if (failures.length)
+          throw new AggregateError(failures, 'Workspace content close incomplete');
+        nativeLease = null;
+        nativeReaderOwner = undefined;
         if (removed && removalScope)
           void resumeEncryptedWorkspaceCleanup(removalScope, true).catch((error) => {
             logRuntimeOperationError('removed workspace cleanup', error);
           });
-      })());
+      })();
+      disposal = pending;
+      void pending.catch(() => {
+        if (disposal === pending) disposal = null;
+      });
+      return pending;
+    };
+    const retirement = retirementOwners.create(
+      () => ({ native: nativeResource, repo: repoResource }),
+      disposeRuntime
+    );
     // Logging-only workspace id resolution inputs intentionally stay out of
     // this effect's dependency list. A cached id can create the runtime before
     // the server id arrives; server-id arrival must not tear down that runtime.
@@ -852,8 +888,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       setRuntimeInitializing(false);
       clearDocMetaCache();
       clearPresenceStates();
-      previousShutdown.current = initialization.then(disposeRuntime);
-      void previousShutdown.current.catch((error: unknown) => {
+      void retirementOwners.retire(retirement).catch((error: unknown) => {
         logRuntimeOperationError('retire provisional runtime', error);
       });
     };
@@ -861,7 +896,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const initialization = (async () => {
       let admitting = false;
       try {
-        await previousShutdown.current;
         if (disposed) return;
         if (modeCloud && requiresAdmission) {
           // Neither a cached organization nor a developer preference authorizes
@@ -881,7 +915,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           admit(descriptor);
           admitting = false;
           if (isEncryptedDescriptor(descriptor)) {
-            const native = platform.e2eeWorkspaces?.runtime;
+            const native = encryptedRuntime;
             if (!native) {
               setRuntime(null);
               setRuntimeInitializing(false);
@@ -894,9 +928,33 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             const retained = readEncryptedLocalIdentity(accountId!, effectiveWorkspaceId);
             if (retained?.genesisHash === descriptor.genesisHash)
               removalScope = { ...retained, windowId: desktopWindowId() };
-            const status = await native.open(effectiveWorkspaceId);
+            const targetNative = {
+              accountId: accountId!,
+              workspaceId: effectiveWorkspaceId,
+              genesisHash: descriptor.genesisHash,
+            };
+            await retirementOwners.drain({ native: targetNative });
+            if (disposed || retired) return;
+            nativeResource = targetNative;
+            const requestedReader =
+              native.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
+            if (requestedReader) {
+              nativeLease = effectiveWorkspaceId;
+              nativeReaderOwner = requestedReader;
+            }
+            const status = await native.open(
+              effectiveWorkspaceId,
+              undefined,
+              accountId!,
+              requestedReader
+            );
             nativeLease = effectiveWorkspaceId;
-            nativeHasKey = status.hasCurrentKey;
+            if (requestedReader && status.readerOwner !== requestedReader)
+              throw new Error('e2ee_reader_owner_mismatch');
+            nativeReaderOwner = status.readerOwner;
+            nativeResource = { ...targetNative, signingPublicKey: status.signingPublicKey };
+            if (disposed || retired) return;
+            nativeHasUsableKey = status.hasCurrentKey || status.writeEpoch != null;
             if (status.genesisHash !== descriptor.genesisHash)
               throw new WorkspaceModeMismatchError();
             localIdentity = {
@@ -921,7 +979,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               clearPresenceStates();
               return;
             }
-            encryptedAccess = createDesktopE2eeContent({
+            encryptedAccess = createE2eeContent({
               runtime: native,
               workspaceId: effectiveWorkspaceId,
               genesisHash: descriptor.genesisHash,
@@ -944,6 +1002,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         } else if (modeCloud && accountId) {
           void verifyInBackground();
         }
+        const targetRepo = {
+          workspaceId: effectiveWorkspaceId,
+          ...(localIdentity ? { identity: localIdentity } : {}),
+        };
+        await retirementOwners.drain({ repo: targetRepo });
+        if (disposed || retired) return;
         // If the user requested a cache clear before the last reload, delete all
         // lody* IndexedDB + Cache Storage now — before the runtime opens the repo
         // DB, while nothing holds those databases open. No-op on normal boots.
@@ -961,6 +1025,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           workspaceIdSource,
           eagerSyncSurface,
         });
+        repoResource = targetRepo;
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
           ...(!isLocalPlatform && !encryptedAccess && !storedDescriptor
@@ -1081,8 +1146,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       setRuntimeInitializing(true);
       clearDocMetaCache();
       clearPresenceStates();
-      previousShutdown.current = initialization.then(disposeRuntime);
-      void previousShutdown.current.catch((error: unknown) => {
+      void retirementOwners.retire(retirement).catch((error: unknown) => {
         logRuntimeOperationError('cleanup dispose', error);
       });
     };

@@ -129,3 +129,9 @@ the sender uses its receipt without history readback or a second dispatch RPC.
 Guide handoff still needs an owner receipt. Archive/delete cancel durable work beyond local
 snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
 [Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
+
+- Protected leases retain captured account/reader until confirmed close. Preallocated
+  leases fence cold opens. Begin native fencing with renderer cleanup. Retain full
+  incomplete owners; only overlapping custody bindings or Repo namespaces wait.
+  Independent workspaces remain usable. Device replacement shares its
+  account/workspace/genesis writer. Usable retained epochs wake existing admission.
