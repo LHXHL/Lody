@@ -23,7 +23,9 @@ other runtimes need their own storage and platform adapters. Backend ports and
 
 Web/mobile custody has an [approved contract](../../specs/e2ee/client-custody.md) and
 opt-in client protection/installation ports in the services entry. No browser or
-native implementation is enabled by those declarations.
+native implementation is enabled by those declarations. The opt-in browser crypto
+adapter imports independent raw Ed25519/X25519 secrets into Scope-owned capabilities;
+it supplies no persistent protection or host admission.
 
 ## Start here
 
@@ -74,6 +76,7 @@ full verified endpoint; server hints or removed-policy high waters are insuffici
 | `@lody/e2ee-core/services` | ports to implement or provide, port errors | public |
 | `@lody/e2ee-core/protocol` | the pure protocol: bytes, CBOR, ledger verification, envelopes, content format | public |
 | `@lody/e2ee-core/host` | what a backend must enforce, staging wire schemas (no Node APIs) | public |
+| `@lody/e2ee-core/adapters/browser-crypto` | Scope-owned JS Ed25519 signer and opaque X25519 handles; no storage or host enablement | public |
 | `@lody/e2ee-core/adapters/node-sqlite` | SQLite implementation of every local store, reference mailbox backend | public |
 | `@lody/e2ee-core/adapters/loro-streams` | `LedgerLog` / `LedgerFeedSource` over a Loro / Durable Streams control stream | public |
 | `@lody/e2ee-core/cloudflare` | Imported once in a Cloudflare Worker so strict Ed25519 runs in WebAssembly (workerd forbids runtime compilation); other runtimes need nothing | public |

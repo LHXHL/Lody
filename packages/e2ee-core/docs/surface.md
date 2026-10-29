@@ -133,3 +133,7 @@ recovery closes and archives the complete identity before opening independent
 custody; ordinary retry grants no replacement authority.
 
 `NodeE2eeCustody.forgetDevice(genesis, signingPublicKey, kind)` is reserved for host-authenticated terminal member removal after workspace users drain. It removes only the matching retained device/credential, spares a different identity and keeps shared KEK custody. The host owns epoch/content-store deletion and cross-process exclusion.
+
+## `@lody/e2ee-core/adapters/browser-crypto`
+
+`importBrowserDevice`, `BrowserDevice`.

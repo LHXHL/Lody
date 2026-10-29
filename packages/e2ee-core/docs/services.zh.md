@@ -170,3 +170,13 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 `LedgerFeedStore.rebase` 比对完整的预期末尾，在同一事务内替换起点和长度、删除
 已覆盖记录，并写入和读回核对新末尾。末尾不符返回 conflict，不修改数据。
+
+## 浏览器曲线适配
+
+`@lody/e2ee-core/adapters/browser-crypto` 的 `importBrowserDevice` 导入独立的
+32 字节 Ed25519 seed 和 X25519 私钥。返回值可作为 `DeviceIdentity.signer`，
+其 `encryption` 可作为 `encryptionKeyPair`，`enc` 是派生的加密公钥。
+使用前须将派生公钥与保留且获批的身份绑定比对；调用方仍须清理输入缓冲区。
+句柄仅在当前 isolate 内供 core HPKE 使用，不能导出、structured-clone 或交给原生
+WebCrypto。close 立即拒绝新操作，等待已准入 HPKE 真正完成后清理私钥；Scope
+释放会自动 close。此适配不提供持久保护、设备批准或主机准入。

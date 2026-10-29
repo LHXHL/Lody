@@ -114,7 +114,16 @@ a private recovery key. Wire schemas are in `@lody/e2ee-core/host`; see the
 valid Ed25519 signature; the library verifies every signature it receives
 before use, so a wrong signer fails instead of producing bad records. Private
 keys stay in your custody. `nativeDeviceSigner(publicKey, cryptoKey)` builds a
-signer from a WebCrypto Ed25519 key.
+signer from a WebCrypto Ed25519 key. For platforms without native curves,
+`importBrowserDevice` from `@lody/e2ee-core/adapters/browser-crypto` imports
+independent raw 32-byte Ed25519 seed/X25519 secret into a Scope-owned signer,
+`enc` and opaque `encryption` pair. Provide the returned device as `signer` and
+its `encryption` as `encryptionKeyPair`. Compare its derived public identities
+with the retained, approved binding first. The caller must wipe input buffers.
+The pair works only with core HPKE in the same isolate; it cannot be exported,
+structured-cloned or passed to native WebCrypto. Close rejects new use, drains
+admitted HPKE and wipes owned private bytes; Scope release closes automatically.
+This crypto adapter provides neither durable protection nor admission.
 
 ### KeyProtector / CandidateProtector
 
