@@ -101,6 +101,7 @@
     "vite": "^7.2.6",
     "vite-plugin-wasm": "^3.6.0",
     "tsx": "4.23.7",
-    "@lody/e2ee-machine-sharing": "workspace:*"
+    "@lody/e2ee-machine-sharing": "workspace:*",
+    "@lody/e2ee-client": "workspace:*"
   }
 }

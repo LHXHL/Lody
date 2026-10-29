@@ -269,3 +269,22 @@ signer、不透明 offset、摘要和首次 credential 时间窗。Pending 阻�
 Safari 16.4 打包，在 Chromium/WebKit 持久 profile 中覆盖重启、固定向量、中断、
 标签页/Worker 竞争、单边缺失、nonce 丢失、忽略写入与原子替换回滚。
 strict durability 仍只是提示；这些测试不证明 iOS 16.4 真机、断电、profile 复制防护或生产验收。
+
+## 个人客户端产品原件
+
+`ClientRpcOriginalStore` 为完整账号/工作区/genesis/device/installation 绑定保存加密
+请求和响应原件。`indexedDbClientRpcOriginals` 与实际 `DeviceIdentity` 核对，返回独立
+字节副本，发送原件首次写入者获胜，变更的入站/响应字节冲突。打包请求上限 32 MiB，
+响应单页 1 MiB，原子批量上限 128 页/32 MiB。`close` 停止接纳并排空本连接，保留
+原件和身份；该端口结构兼容共享 RPC 实现的 `E2eeRpcStore`。
+
+`ClientApprovalEvidenceStore` 与 `indexedDbClientApprovalEvidence` 按实际 16 字节
+配对 session 保存不可变公开完整历史证据，绑定同一完整身份。分页与元数据一次原子
+提交，上限 256 页、每页 2 MiB、总量 72 MiB（含 JSON hex 展开）。缺页、额外页、
+小数键、结构或摘要不匹配均失败，不修复、不删除。校验和用于发现存储损坏，只有固定
+签名账本重放建立信任。独立分页存储不改变既有单消息 16 MiB 的
+`ClientPairingOriginalStore` 合同。
+
+端口不包含私有 credential、授权判断、网络操作，也不在 IDB 事务内等待密码/网络。
+可选 [`@lody/e2ee-client`](../../e2ee-client/README.zh.md) host 负责证明验证、实际
+保管读回、审批、当前成员状态及确认/ACK。

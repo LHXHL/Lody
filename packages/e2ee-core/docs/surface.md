@@ -40,7 +40,7 @@ repository's tests and the Lab, with no compatibility promise.
 | Value types   | `GenesisHash`, `SigningPublicKey`, `LedgerView`, `LedgerCheckpoint`, `LedgerReadPage`, `LedgerFeedState`, `MailboxSlot`, `EpochStagedGroup`, `EpochStagedGroupKey`                                                                                                                                                                                                                                                                  |
 | Recovery      | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
-| Client custody | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore`, `ClientCustodyWriter`, `ClientIdentityOriginals` |
+| Client custody | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore`, `ClientCustodyWriter`, `ClientIdentityOriginals`, `ClientRpcOriginalStore`, `ClientRpcOriginal`, `ClientApprovalEvidenceStore` |
 | Pairing originals | `ClientPairingPurpose`, `ClientPairingKey`, `ClientPairingOriginal`, `ClientPairingOriginalStore` |
 
 The services entry also exports `SnapshotPublicationJournal`,
@@ -147,7 +147,7 @@ custody; ordinary retry grants no replacement authority.
 
 `indexedDbClientStores`, `IndexedDbStoreOptions`, `indexedDbClientInstallationStore`,
 `indexedDbClientKeyStores`, `IndexedDbClientKeyStoreOptions`,
-`indexedDbSnapshotPublication`, `IndexedDbSnapshotPublicationOptions`.
+`indexedDbSnapshotPublication`, `IndexedDbSnapshotPublicationOptions`, `indexedDbClientRpcOriginals`, `IndexedDbClientRpcStoreOptions`, `indexedDbClientApprovalEvidence`.
 
 ## `@lody/e2ee-core/adapters/browser-custody`
 

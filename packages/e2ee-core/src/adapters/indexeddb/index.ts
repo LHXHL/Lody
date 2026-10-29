@@ -906,3 +906,7 @@ export {
   indexedDbSnapshotPublication,
   type IndexedDbSnapshotPublicationOptions,
 } from './client-snapshots';
+
+export { indexedDbClientRpcOriginals, type IndexedDbClientRpcStoreOptions } from './client-rpc';
+
+export { indexedDbClientApprovalEvidence } from './client-approval-evidence';

@@ -48,7 +48,6 @@ close aborts and awaits the underlying SDK operation before credential release;
 failed native store cleanup retains its handle for retry. Evidence is not garbage
 collected in this implementation.
 
-
 The response reader is shared with the fixed [file and preview feature channel](../feature/2026-10-28-e2ee-file-preview-availability.md). That channel extends method-body framing for large file payloads without changing dispatch originals, the 1 MiB frame limit or execution claims.
 
 ## Evidence and limits
@@ -99,3 +98,12 @@ ledger refresh, WAN conditions and actual ACP/model startup are absent. No paire
 packaged Electron/CLI agent environment was exercised; therefore real
 send-to-agent-start p50/p95/p99 remains unmeasured. The fixture handler is entered
 after the production claim, without representing a running agent.
+
+The crypto/complete-response implementation now lives in the Node-free
+`@lody/loro-streams-rpc/e2ee-client` entry. Its immutable store port is effectful
+so native SQLite and browser IndexedDB share exact intent, original and page
+semantics. `e2ee-native` supplies only the existing SQLite adapter; the optional
+personal-client host uses bound client stores. Local sealing through first
+retention is finite and owned across interruption; plaintext cleanup also runs
+on failure. Remote policy preflight remains interruptible. This changes no
+frame, method allowlist or execution authority and enables no product bridge.

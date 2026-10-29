@@ -1,0 +1,66 @@
+# 个人设备客户端 host
+
+[English](README.md)
+
+`@lody/e2ee-client` 是可选的平台中立产品组合，使用现有 `@lody/e2ee-core`。
+包内没有 Node、Electron、文件系统、SQLite、默认账号或云端地址。桌面消费共享的
+配对编解码、完整历史验证和有限收钥维护流程，保留既有原生存储与产品装配。
+
+## 创建与所有权
+
+在 Scope 中提供 `PersonalHostPlatform`、`PersonalHostRemote`、
+`ClientInstallationStore`、`ClientCustodyWriter`、`ClientPairingOriginalStore`，
+然后创建 `makePersonalDeviceHost()`。固定账号、工作区和独立传入的 genesis；
+每项能力绑定同一完整身份。另一账号的登录或响应标签不能选择该绑定，缺能力明确失败。
+
+平台提供持久保管、账本端口、密钥存储/后端、公开审批证据和可选 RPC 原件存储。
+浏览器可以组合既有 browser-crypto/browser-custody 与 IndexedDB 适配器；移动端用同一
+窄 custody 形状接入真实原生生命周期。工厂借用的 credential 只在所属 Scope 内有效，
+其 finalizer 必须在释放前取消并排空实际调用。额外 Layer 输出不能替换 host 固定的
+身份、验证器和 installed/candidate protector。产品调用者拿不到私钥、credential
+或通用签名能力。
+
+- `prepare(offer)` 显式保留身份和请求，先于任何网络。`begin`、`claim`、`cancel`
+  交换同一原件。pending、admitting、超时和通用失败都保留它；只有完全匹配的明确
+  终态才允许新 session，并保持可用身份与固定 pin。
+- `open(offer)` 实际解包并重新验证审批和自身准入。登录、ready 回执或持钥证明都
+  不能单独启动收钥。
+- session 提供已验证账本读/刷新、有限收钥轮次、状态、文档保护、普通账本命令及
+  显式 resume/ACK、换代和固定产品 RPC 的准备/响应验证。命令不会把另一项未决意图
+  悄悄当作本次操作，也不会重签未知提交。
+- `close()` 停止接纳，取消并等待操作，再释放密钥、credential 和数据库所有者。
+  close/logout/清缓存不删除身份。组合不创建定时器、文档 Repo 或普通传输。
+
+## 审批、替换与失败
+
+快照审批使用独立传入的 endorser 和固定 core 验证器；完整历史从独立 genesis
+重放每个签名。二者都必须准入完全相同的个人签名/加密公钥及成员。受保护的 credential
+包还认证不可变 offer pin。原始审批分页及其校验和只是待重放证据，不是权限。
+
+`personalLedgerControl({ approval })` 通过注入的 `LedgerFeedStore`、
+`LedgerPinStore`、`SubmissionJournal`、`LedgerLog`、`LedgerFeedSource`、
+`WorkspaceScope` 组合持久 `LedgerFeed`。feed/pin 使用稳定数据库，提交槽按身份实例
+独立。刷新有界，验证每条后缀后才持久化位置，不 reset 或 rebase 损坏行。
+
+显式 `prepare(offer, true)` 准备受保护替换候选，旧指针保持 current。第二个未决候选
+会被拒绝。替换打开要求桌面重新批准的完整历史，以及成功的 pin/origin 验证；之后才
+实际 `drainOld` 并按批准合同原子保留 retired 归档、切换 current。host 在新审批原件中
+保留首次快照 origin；冷重开从新签名完整历史重新限定其历史管理员、签名和状态。
+旧缓存标签或丢失的 KEK 不能授予信任。缺失、未知原件要求重新审批，不重建 KEK。
+
+密钥流程延迟创建，与账本所有权独立。临时密钥/repair 失败可重试，不封住账本。
+当前钥缺失时，状态与文档发送仍可选择现有规则允许的保留 epoch；rotation 提示不
+阻塞本已获准的发送。撤销、本地身份实例改变、回滚和错误作用域仍阻止密钥/RPC/正文
+操作。core 保留并验证 receive/report/distribution 原件；共享有限维护流程只确认已
+观察到的业务终态，也会确认另一阶段失败时成功的兄弟阶段。没有明文降级。
+
+## 验证与限制
+
+`pnpm --filter @lody/e2ee-client test` 检查固定证明和 credential 边界。
+`test:browser` 使用真实 Chromium/WebKit 密码能力、Web Locks 和 IndexedDB，覆盖进程
+重开、中断安装读回、未知 relay 结果、关闭、原子换身份、保留 epoch 发送、撤销和事务
+故障。可移植 bundle 以 Safari 16.4 为编译目标且无 Node 依赖，不代表 iOS 16.4 真机、
+原生插件、硬件或断电验收。IndexedDB `strict` 只是耐久提示。Web 按
+[已批准 custody Spec](../../specs/e2ee/client-custody.zh.md) 信任页面下发代码使用私钥。
+包本身不启用产品 runtime，应用桥接另行完成。
+[所有权理由](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.zh.md#个人设备产品组合)。

@@ -397,11 +397,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install custody acceptance dependencies
-        run: pnpm --filter @lody/e2ee-core... install --frozen-lockfile --ignore-scripts
+        run: pnpm --filter @lody/e2ee-client... install --frozen-lockfile --ignore-scripts
       - name: Install Chromium and WebKit
         run: pnpm --filter @lody/e2ee-core exec playwright install --with-deps chromium webkit
       - name: Verify persisted KEK, installation recovery, journals and exclusion
         run: pnpm --filter @lody/e2ee-core test:browser-custody
+
+      - name: Verify portable personal host and immutable client originals
+        run: pnpm --filter @lody/e2ee-client test:browser
 
   # Stable required check: green only when every group succeeded.
   # Cancellation supersedes this run; do not turn cancelled groups into a failure.

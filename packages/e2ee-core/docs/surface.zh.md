@@ -34,7 +34,7 @@
 | 值类型   | `GenesisHash`, `SigningPublicKey`, `LedgerView`, `LedgerCheckpoint`, `LedgerReadPage`, `LedgerFeedState`, `MailboxSlot`, `EpochStagedGroup`, `EpochStagedGroupKey`                                                                                                                                                                                                                                                                  |
 | 恢复     | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
-| 客户端保管 | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore`, `ClientCustodyWriter`, `ClientIdentityOriginals` |
+| 客户端保管 | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore`, `ClientCustodyWriter`, `ClientIdentityOriginals`, `ClientRpcOriginalStore`, `ClientRpcOriginal`, `ClientApprovalEvidenceStore` |
 | 配对原件 | `ClientPairingPurpose`, `ClientPairingKey`, `ClientPairingOriginal`, `ClientPairingOriginalStore` |
 
 services 入口还导出 `SnapshotPublicationJournal`、`SnapshotPublicationError`、
@@ -135,7 +135,7 @@ genesis、公钥 AAD 完全匹配的当前 v1 原件才能重开。属于其他�
 
 `indexedDbClientStores`, `IndexedDbStoreOptions`, `indexedDbClientInstallationStore`,
 `indexedDbClientKeyStores`, `IndexedDbClientKeyStoreOptions`,
-`indexedDbSnapshotPublication`, `IndexedDbSnapshotPublicationOptions`.
+`indexedDbSnapshotPublication`, `IndexedDbSnapshotPublicationOptions`, `indexedDbClientRpcOriginals`, `IndexedDbClientRpcStoreOptions`, `indexedDbClientApprovalEvidence`.
 
 ## `@lody/e2ee-core/adapters/browser-custody`
 

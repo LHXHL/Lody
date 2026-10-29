@@ -92,3 +92,29 @@ profile，覆盖进程重开、双 tab 竞争、原生 abort/配额/写入不一
 切换，桌面批准替换后仍保留旧 journal。首次包装候选归待决请求的本地完成回执，
 本地完成不等于桌面审批。浏览器引擎测试覆盖这些边界与全部固定用途，但不证明最低
 OS 硬件或断电验收。已批准 Spec 与账本 v1 均不变。
+
+## 个人设备产品组合
+
+可选 [`@lody/e2ee-client`](../../../../packages/e2ee-client/README.zh.md) 在 core 之外
+拥有个人配对、打开、收钥、管理与 RPC 组合。桌面消费同一配对编解码、固定完整历史
+验证器和有限收钥维护流程；原生存储只是适配器，不复制第二棵协议实现。可移植 RPC
+也只保留一个 Effect 不可变存储端口和薄 SQLite 兼容包装。此处不启用产品传输。
+
+冷重开后，回执不能认证独立传入的 endorser。因此既有 device-credential 用途保护
+当前版本本地 CBOR `[1, credential32, pinDigest32]`。SHA-256 摘要覆盖 JSON 数组：
+域 `lody-e2ee/client-credential-pin/v1\0`（一个 NUL）、账号、工作区、genesis/device
+hex、installation ID、原 genesis record hex、endorser、membership。排除 session，
+使明确终态后的重试保留同一 credential/身份；pending/admitting/未知尝试不能换 session。
+这是本地受保护载荷，不是新包装、签名或账本格式。
+
+完整历史证明可能超过固定单消息配对上限。独立、有界、不可变的公开分页证据端口
+原子提交全部分页、数量/大小/摘要；校验和或已存审批标签都不是权限。替换携带首次
+快照原件，不递归嵌入旧审批。新签名完整历史重新限定其历史管理员、签名和精确状态，
+然后才重开既有 origin/pin。自签缓存或按新设备另开 feed 命名空间会掩盖信任丢失和
+回滚证据，因此均不支持。
+
+账本所有者先于延迟创建的密钥所有者。独立密钥/repair 失败可重试，当前钥缺失时
+仍可用获准的保留 epoch。替换先验证新审批与 pin，再排空健康旧 owner，按已批准
+合同原子切换归档/current。Scope 关闭先停止接纳、等待操作，再释放密钥/credential/
+存储，不删除身份或未知原件。浏览器引擎与桌面回归验证这些合同；最低 OS 真机、
+原生插件和断电耐久仍需独立验收。

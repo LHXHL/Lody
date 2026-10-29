@@ -7,7 +7,13 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 
 ## Invariants
 
-- Encrypted machine RPC uses one feature DTO/chunk codec and native complete-response assembler.
+- `./e2ee-client` is the shared Node-free implementation. Its effectful immutable
+  original store retains/readbacks before success; whole response batches are
+  atomic. `./e2ee-native` only supplies the SQLite adapter. Keep finite local
+  sealing/retention owned through completion and wipe plaintext on failure as well
+  as success; never put remote policy waits under that uninterruptible section.
+
+- Encrypted machine RPC uses one feature DTO/chunk codec and shared complete-response assembler.
   The closed pure-read list uses fresh read authority, never execution journals; other admitted
   Code Collab/preview actions require write authority and execution claims. Keep same-member
   machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.

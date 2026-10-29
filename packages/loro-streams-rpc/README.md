@@ -23,7 +23,9 @@ ACKs are encrypted; only random correlation IDs and ciphertext enter Streams.
 Complete sealed frames are limited to 1 MiB, including 143 bytes of overhead.
 The resource is `rpc:<base64url(machineId)>`, with strict UTF-8 machine IDs.
 
-`./e2ee-native` owns crypto and immutable SQLite originals in trusted hosts;
+`./e2ee-client` owns portable crypto and the complete-response assembler over an
+effectful immutable `E2eeRpcStore`; `./e2ee-native` supplies the existing SQLite
+adapter. The fixed DTOs, closed method list and wire bytes are shared;
 `./e2ee-streams` owns bounded shared readers and request correlation. The browser
 uses narrow host preparation/response methods and never receives signing keys.
 Preparation and ACK verification compare the parsed DTO's JSON wire representation,
@@ -90,3 +92,10 @@ codec with read authority and no execution journal. See the
 [read boundary](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md). The format,
 room boundaries and acceptance limits are recorded in the
 [availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).
+
+The optional personal-device host in [`@lody/e2ee-client`](../e2ee-client/README.md)
+uses `ClientRpcOriginalStore`/IndexedDB for the same encrypted RPC implementation.
+A sent-original race returns the first winner; changed incoming or response bytes
+conflict. Batch response pages commit atomically. Owned copies, native completion
+and close/drain remain adapter obligations. No receipt grants execution authority,
+and this optional composition does not enable a public cloud connection.

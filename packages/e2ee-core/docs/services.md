@@ -377,3 +377,28 @@ persistent-profile reopen, exact vectors, interruptions, competing tabs/workers,
 missing halves, nonce loss, ignored writes and atomic replacement rollback.
 Strict durability remains a hint. These tests do not establish iOS 16.4 real-device,
 power-loss, profile-copy resistance or production acceptance.
+
+## Personal-client product originals
+
+`ClientRpcOriginalStore` retains encrypted request/response originals for one full
+account/workspace/genesis/device/installation binding. `indexedDbClientRpcOriginals`
+checks that binding against the actual `DeviceIdentity`, returns owned bytes,
+keeps the first sent original and refuses changed incoming/response bytes. A
+packed request may be 32 MiB; a response page remains bounded to 1 MiB and an
+atomic batch to 128 pages/32 MiB. `close` fences/drains this connection without
+clearing originals or identity. It is structurally compatible with the portable
+RPC implementation's `E2eeRpcStore`.
+
+`ClientApprovalEvidenceStore` and `indexedDbClientApprovalEvidence` retain one
+immutable public full-history proof per actual 16-byte pairing session, with the
+same complete binding. All pages and metadata commit atomically: at most 256
+pages, 2 MiB each and 72 MiB total (including JSON hex expansion). Missing, extra,
+fractional, malformed or digest-mismatched pages fail without repair or deletion.
+Checksums detect storage damage; only fixed signed-ledger replay establishes
+trust. This separate paged store leaves the existing 16 MiB single-message
+`ClientPairingOriginalStore` contract unchanged.
+
+These ports contain no private credentials, authorization decision, network
+operation or crypto/network await inside IndexedDB transactions. The opt-in
+[`@lody/e2ee-client`](../../e2ee-client/README.md) host owns proof verification,
+actual custody readback, approval, current membership and confirmation/ACK.

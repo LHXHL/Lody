@@ -232,3 +232,9 @@ The [pre-freeze format review](../../.agents/notes/proposed/architecture/2026-10
 ```sh
 pnpm --filter @lody/e2ee-core test:browser-custody
 ```
+
+The optional [`@lody/e2ee-client`](../e2ee-client/README.md) package composes personal
+device approval/open/key delivery/management/RPC over these ports. Its paged
+public approval evidence and encrypted RPC originals use the stable client
+layout; stores still grant no permission. This does not enable product runtime
+assembly or native mobile custody.
