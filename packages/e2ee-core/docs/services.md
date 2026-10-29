@@ -136,6 +136,34 @@ body, so the protector needs no knowledge of the format.
   `apps/electron/src/main/e2ee-custody.mts` provides both protectors and
   `DeviceIdentity` from an OS-wrapped key (Electron `safeStorage`).
 
+### ClientKeyCustody / ClientInstallationStore
+
+These opt-in ports freeze the [Web/mobile custody draft](../../../specs/e2ee/client-custody.md)
+without enabling a product host. The installation store captures ClientCustodyScope
+(account, workspace, independently pinned genesis) before reading the retained
+device/installation ID. Custody then captures that complete ClientCustodyBinding
+and must authenticate it before use. Store the receipt in one scope slot, so a
+competing tab with another installation ID conflicts instead of creating a second
+identity. The store atomically advances revision and first wrapped identity
+originals; it does not perform crypto or confer approval.
+
+ClientKeyCustody exposes status/create/wrap/unwrap/delete only. status never creates
+keys. create follows durable preparation and explicit pairing consent; it never
+replaces uncertain retained state. Each local authenticated wrapper binds version,
+complete scope and the closed key purpose. Web persists a non-extractable AES-GCM
+KEK; native clients keep that capability in a device-bound protector. Native
+settlement must finish before releasing borrowed buffers or writer ownership.
+Missing protection blocks encrypted opening; loss or ambiguity preserves originals
+and requires exact reconciliation or desktop reapproval. Scope close, ordinary
+cache cleanup and logout retain identities; deletion is reserved for explicit
+scoped hard reset or authenticated terminal removal after drain.
+
+The existing identity, installed/candidate protectors, ledger/submission stores and
+key/snapshot journals keep their responsibilities. This contract adds no key-export,
+file-access or verifier hook. Browser crypto/IDB adapters and portable host/runtime
+consumers require separate implementation and platform acceptance. Existing desktop
+and CLI APIs remain unchanged.
+
 ## Application ports
 
 ### WorkspaceScope

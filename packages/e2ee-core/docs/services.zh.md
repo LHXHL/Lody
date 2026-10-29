@@ -91,6 +91,26 @@
 - 保护器总能读取它保护的内容：它是宿主平台的信任边界，而不是对被攻破宿主的隔离。
 - 桌面端：`apps/electron/src/main/e2ee-custody.mts` 中的 `desktopE2eePorts(custody, device)` 基于操作系统包装的密钥（Electron `safeStorage`）提供两个保护器和 `DeviceIdentity`。
 
+### ClientKeyCustody / ClientInstallationStore
+
+这两个可选端口冻结 [Web/移动端保管 draft](../../../specs/e2ee/client-custody.zh.md)，
+不启用产品 host。安装 store 先捕获 ClientCustodyScope（账号、工作区、独立钉住的
+genesis），再读出保留的设备与安装 ID。custody 捕获完整 ClientCustodyBinding，
+使用前必须认证该绑定。回执按一个 scope 只有一个位置，因此其他标签
+持不同安装 ID 会冲突，不能生成第二个身份。store 原子推进 revision 并保存第一份
+包装身份原件，不执行 crypto，也不授予批准。
+
+ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建密钥；create
+在持久化准备和显式配对同意后执行，不替换未知的保留状态。本地认证包装绑定版本、
+完整 scope 和封闭用途。Web 持久化不可导出 AES-GCM KEK；原生客户端将该能力放在
+设备绑定保护器内。实际原生操作结束前，不释放借入缓冲或单写者所有权。缺保护拒开
+加密空间；丢失或不确定保留原件，只能精确核对或桌面重新审批。scope 关闭、普通清
+缓存与 logout 保留身份；仅显式限定 hard reset 或排空后的已认证终端移除可删除。
+
+既有 identity、installed/candidate protector、账本/提交 store 及密钥/快照 journal
+保留原责任。本合同不新增密钥导出、文件访问或验签钩子。浏览器 crypto/IDB 适配器与
+可移植 host/runtime 消费者须另行实现和平台验收，既有桌面/CLI API 不变。
+
 ## 应用端口
 
 ### WorkspaceScope
