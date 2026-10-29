@@ -139,3 +139,30 @@ Decisions behind this structure: the owning note
 [2026-10-16 e2ee-core service architecture](../../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md).
 Earlier protocol and durability decisions:
 [current decisions](../../../.agents/notes/implemented/architecture/2026-10-15-e2ee-current-decisions.md).
+
+## Browser curves and ownership
+
+The opt-in browser adapter supplies independent JS Ed25519/X25519 capabilities
+without changing ledger v1 or the epoch HPKE suite/domain/AAD. Ed25519 uses the
+already pinned noble backend. HPKE uses the upstream pinned JS X25519 KEM;
+sealing does not require native X25519, while native recipient keys retain their
+existing path. Without WASM, only explicit native Ed25519 non-support (or absent
+SubtleCrypto) selects the fixed strict JS verifier; a false signature or other
+backend failure never selects another acceptance rule.
+
+Raw private fields from the upstream JS key object must not escape behind the
+`CryptoKeyPair` type. Core keeps that object in a private WeakMap and exposes
+frozen metadata handles. A borrowed HPKE lease keeps the owner's secret alive
+through actual crypto settlement, including interruption. Close fences new leases
+and signing before waiting for the bounded set of admitted operations, then wipes
+both secrets. Cloned, mixed and closed handles fail; native keys remain native.
+These handles do not provide native non-extractability or protection against trusted
+application code. The platform still owns persistent KEK protection and admission.
+
+The `@hpke/common@1.10.1` patch removes only Node <=18 dynamic builtin loading
+from both distributions. All supported Node versions provide global WebCrypto;
+missing browser WebCrypto fails instead of importing Node. Algorithms are unchanged.
+`test:browser-crypto` builds for Safari 16.4 with no external imports and executes
+in Chromium/WebKit with native curves and WASM disabled. Its separate CI job
+installs both engines; normal unit tests need no browser. This is desktop engine
+compatibility evidence, not minimum-OS real-device or custody acceptance.

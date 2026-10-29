@@ -185,6 +185,9 @@ patchedDependencies:
   '@better-auth/electron@1.6.33':
     hash: 222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038
     path: patches/@better-auth__electron@1.6.33.patch
+  '@hpke/common@1.10.1':
+    hash: 8e787432c27a6dedcf35b3c326bbb18b0ffd071e42a0c69feb749a41dea32142
+    path: patches/@hpke__common@1.10.1.patch
   '@lobehub/streamdown@1.4.0':
     hash: 8612b888268c5005fef076aaaf07e990520f59477a48a755d63a93eb4a58cda1
     path: patches/@lobehub__streamdown@1.4.0.patch
@@ -1599,6 +1602,9 @@ importers:
       '@hpke/core':
         specifier: 1.9.0
         version: 1.9.0
+      '@hpke/dhkem-x25519':
+        specifier: 1.7.0
+        version: 1.7.0
       '@ipld/dag-cbor':
         specifier: 10.0.2
         version: 10.0.2
@@ -1624,12 +1630,18 @@ importers:
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.19.2(patch_hash=1ceebd2af6eaee03774b433ba7e6341244aa754c2e5085b1cf1bf3f688a31284)(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.17.0)
+      '@playwright/test':
+        specifier: 1.58.2
+        version: 1.58.2
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 7.6.13
       '@types/node':
         specifier: 'catalog:'
         version: 24.10.12
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       oxfmt:
         specifier: ^0.65.0
         version: 0.65.0
@@ -3694,6 +3706,10 @@ packages:
 
   '@hpke/core@1.9.0':
     resolution: {integrity: sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==}
+    engines: {node: '>=16.0.0'}
+
+  '@hpke/dhkem-x25519@1.7.0':
+    resolution: {integrity: sha512-mgqkCUj82jBoKSa55VG/QAih4d5npalRd3uu/U/t3PvvrSbrYjDnok6PDxFwRPh+9aUNRX0tBtxupqtAiT+P1A==}
     engines: {node: '>=16.0.0'}
 
   '@humanfs/core@0.19.1':
@@ -16312,13 +16328,17 @@ snapshots:
 
   '@hpke/chacha20poly1305@1.8.0':
     dependencies:
-      '@hpke/common': 1.10.1
-
-  '@hpke/common@1.10.1': {}
+      '@hpke/common': 1.10.1(patch_hash=8e787432c27a6dedcf35b3c326bbb18b0ffd071e42a0c69feb749a41dea32142)
 
   '@hpke/core@1.9.0':
     dependencies:
-      '@hpke/common': 1.10.1
+      '@hpke/common': 1.10.1(patch_hash=8e787432c27a6dedcf35b3c326bbb18b0ffd071e42a0c69feb749a41dea32142)
+
+  '@hpke/dhkem-x25519@1.7.0':
+    dependencies:
+      '@hpke/common': 1.10.1(patch_hash=8e787432c27a6dedcf35b3c326bbb18b0ffd071e42a0c69feb749a41dea32142)
+
+  '@hpke/common@1.10.1(patch_hash=8e787432c27a6dedcf35b3c326bbb18b0ffd071e42a0c69feb749a41dea32142)': {}
 
   '@humanfs/core@0.19.1': {}
 

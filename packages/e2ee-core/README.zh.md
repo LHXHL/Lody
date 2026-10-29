@@ -168,3 +168,7 @@ Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可�
 [node-custody](docs/surface.zh.md) 保管实现，并分别提供经过核对的系统包装器。
 
 [冻结前格式审查](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.zh.md)记录账本格式的未决事项和仅支持当前版本的格式盘点。
+
+浏览器曲线能力由 `@lody/e2ee-core/adapters/browser-crypto` 提供：
+`importBrowserDevice` 导入独立的原始 Ed25519/X25519 私钥，返回由 Scope 持有的
+签名器和不透明 X25519 句柄。它不提供持久保护、设备批准或运行时启用。

@@ -10,7 +10,7 @@ whitepaper, Specs, decisions and this package's docs. Contract:
 ## Structure
 
 - Entries are exactly `.` (workflows), `./services` (ports), `./protocol`,
-  `./host`, `./adapters/node-custody`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
+  `./host`, `./adapters/node-custody`, `./adapters/browser-crypto`, `./adapters/node-sqlite`, `./adapters/loro-streams`, `./cloudflare`
   (bundle-time WebAssembly for workerd) and the unstable `./internal`. Add an export only to the entry whose role it serves.
 - Protocol code is pure (Result, plus Effect only for async crypto/verification)
   and imports no service or adapter. Workflows depend only on protocol code and
@@ -55,7 +55,11 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   verified context; frame metadata is unverified. A valid signature establishes
   neither permission nor AEAD validity.
 - Ed25519 requires canonical nonzero prime-subgroup A and R and S<L
-  (`zip215: false`); fixed native Effects and private exact caches keep these checks.
+  (`zip215: false`); fixed backends and private exact caches keep these checks.
+  Without WASM, explicit native Ed25519 non-support uses the same strict JS verifier;
+  other native failures remain unavailable. Browser private handles stay opaque and
+  cannot cross isolates. Their owner stops admission and drains HPKE before wiping
+  private bytes; shape-compatible objects never become valid handles.
   The WebAssembly verifier (`wasm/ed25519-strict`, rebuilt only by its `build.mjs`)
   is a fixed backend with the pure-JS fallback, never injectable, and must accept
   exactly what the pure-JS path accepts (`test/ed25519-wasm.test.ts`).
