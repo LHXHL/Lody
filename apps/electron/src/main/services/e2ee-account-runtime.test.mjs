@@ -830,6 +830,11 @@ async function personalJoinFixture(t) {
           lockDepth++
           try {
             return await Effect.runPromise(work(owner))
+          } catch (error) {
+            // Match the account boundary's public projection used by the IPC retry.
+            if (error.code === 'snapshot-history-required')
+              throw new Error('e2ee_snapshot-history-required', { cause: error })
+            throw error
           } finally {
             lockDepth--
           }
@@ -934,8 +939,54 @@ async function personalJoinFixture(t) {
     row.invitationHex = invitation.invitationHex
     return invitation
   }
-  return { open, rows, relay, db, workspaceId, append, admit }
+  return { open, rows, relay, db, workspaceId, append, admit, client, remote }
 }
+
+void test('personal join IPC bridges the control-page observation outside the account lock and retains an offline proof', async (t) => {
+  const f = await personalJoinFixture(t)
+  const first = await f.open('first')
+  await first.create()
+  let second = await f.open('second')
+  const before = await first.ipc.status(f.workspaceId)
+  const observed = {
+    genesisHash: before.genesisHash,
+    headHash: before.headHash,
+    length: before.length
+  }
+  const offer = await first.ipc.personalPairingOffer(f.workspaceId)
+  await second.ipc.preparePersonalJoin(offer)
+  const invitation = await f.admit(first, second, offer)
+  await Effect.runPromise(
+    second.bootstrap.acceptPersonalJoin(f.workspaceId, invitation.invitationHex)
+  )
+  // Reproduce the claim's native open before the renderer supplies its old control-page point.
+  await second.ipc.open(f.workspaceId)
+  await second.ipc.close(f.workspaceId)
+  await assert.rejects(second.ipc.open(f.workspaceId, observed), /unauthorized history/)
+  assert.equal(second.readers.has(f.workspaceId), false)
+  const ledger = await Effect.runPromise(first.host.ledgerView(f.workspaceId))
+  f.client.history = () =>
+    f.remote(() => ({
+      workspaceId: f.workspaceId,
+      genesisHash: before.genesisHash,
+      startIndex: 0,
+      recordsHex: ledger.recordsHex,
+      checkpoint: { length: ledger.status.length, headHash: ledger.status.headHash },
+      position: `p1:${f.workspaceId}:${ledger.status.length}:source:0`,
+      nextCursor: null
+    }))
+  assert.equal((await second.ipc.open(f.workspaceId, observed)).length, 2)
+  assert.equal(second.readers.get(f.workspaceId).get(23), 1)
+  await second.close()
+  second = await f.open('second')
+  f.client.history = () => Effect.die('offline reopen must use retained proof')
+  assert.equal((await second.ipc.open(f.workspaceId, observed)).length, 2)
+  await assert.rejects(
+    second.ipc.open(f.workspaceId, { ...observed, headHash: '00'.repeat(32) }),
+    (error) => error.code === 'local-evidence-conflict'
+  )
+  assert.equal(second.readers.get(f.workspaceId).get(23), 1)
+})
 
 void test('cold renderer marker recovery reads the real IPC boundary without granting status access', async (t) => {
   const f = await personalJoinFixture(t)

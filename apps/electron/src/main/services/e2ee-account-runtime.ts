@@ -599,6 +599,7 @@ function publicE2eeFailure(error: unknown): Error {
     'member_removed',
     'conflict',
     'local-evidence-conflict',
+    'snapshot-history-required',
     'closed',
     'corrupt',
     'invalid-input',

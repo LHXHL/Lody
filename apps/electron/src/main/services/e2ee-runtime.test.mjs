@@ -2,7 +2,7 @@ import { openSqliteConnection } from '../../../../../packages/e2ee-core/src/adap
 import { existsSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -19,7 +19,8 @@ import { disposeEpochKey } from '@lody/e2ee-core/internal'
 import {
   makeSqliteKeyMailbox,
   referenceKeyMailbox,
-  sqliteInstalledKeyStore
+  sqliteInstalledKeyStore,
+  sqliteLedgerPinStore
 } from '@lody/e2ee-core/adapters/node-sqlite'
 import {
   Bytes,
@@ -1784,7 +1785,16 @@ void test('a second personal desktop verifies its pinned snapshot, installs thro
       )
       assert.ok(Result.isFailure(yield* Effect.result(second.host.open(workspaceId))))
       yield* second.bootstrap.acceptPersonalJoin(workspaceId, invitation.invitationHex)
-      const joined = yield* second.host.open(workspaceId)
+      yield* second.host.open(workspaceId)
+      const joined = yield* second.host.open(
+        workspaceId,
+        {
+          genesisHash: prepared.genesisHashHex,
+          headHash: prepared.genesisHashHex,
+          length: 1
+        },
+        [page(records, prepared.genesisHashHex, 0)]
+      )
       assert.equal(joined.length, 2)
       assert.equal(joined.deviceKind, 'personal')
       assert.equal(joined.hasDeviceCredential, true)
@@ -1872,7 +1882,7 @@ void test('a second personal desktop verifies its pinned snapshot, installs thro
         yield* first.host.openContent(workspaceId, { room, context, ...reply, additionalData }),
         plaintext
       )
-      assert.deepEqual((yield* second.host.ledgerView(workspaceId)).recordPositions, [0])
+      assert.deepEqual((yield* second.host.ledgerView(workspaceId)).recordPositions, [0, 1])
     })
   )
   await execute(
@@ -1901,6 +1911,164 @@ void test('a second personal desktop verifies its pinned snapshot, installs thro
     })
   )
 })
+
+for (const observedLength of [1, 2])
+  for (const nativePin of [false, true, ...(observedLength === 2 ? ['genesis'] : [])]) {
+    void test(`snapshot join proves an earlier observation at ${observedLength} (native pin: ${nativePin}) and reopens offline`, async (t) => {
+      const directory = await fixture(t)
+      const secondDirectory = join(directory, 'second-desktop')
+      let observed, records, prepared
+      await execute(
+        Effect.gen(function* () {
+          const first = yield* ownerWithHost(directory)
+          prepared = yield* bind(first)
+          records = yield* makeRecords(first.custody, prepared, observedLength)
+          yield* first.host.open(workspaceId)
+          yield* first.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, 0)
+          )
+          observed = {
+            genesisHash: prepared.genesisHashHex,
+            headHash: hex(hashRecordBytes(records.at(-1)).toBytes()),
+            length: observedLength
+          }
+          const offer = yield* first.host.personalPairingOffer(workspaceId)
+          const second = yield* ownerWithHost(secondDirectory)
+          const request = yield* second.bootstrap.preparePersonalJoin(offer)
+          const admission = yield* first.host.preparePersonalAdmission(
+            workspaceId,
+            request.requestHex
+          )
+          records.push(Buffer.from(admission.recordHex, 'hex'))
+          yield* first.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, prepared.genesisHashHex, observedLength)
+          )
+          const invitation = yield* first.host.personalInvitation(
+            workspaceId,
+            offer.pairingSessionId
+          )
+          yield* second.bootstrap.acceptPersonalJoin(workspaceId, invitation.invitationHex)
+          const genesis = Result.getOrThrow(
+            Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+          )
+          yield* Effect.promise(() =>
+            mkdir(join(secondDirectory, 'workspaces', workspaceId), { recursive: true })
+          )
+          const pins = Context.get(
+            yield* Layer.build(
+              sqliteLedgerPinStore({
+                path: join(secondDirectory, 'workspaces', workspaceId, 'ledger-pin.sqlite'),
+                mode: 'create-or-open'
+              }).pipe(Layer.provide(Layer.succeed(WorkspaceScope, { genesis })))
+            ),
+            LedgerPinStore
+          )
+          if (nativePin)
+            yield* pins.write({
+              length: nativePin === 'genesis' ? 1 : observedLength,
+              head: hashRecordBytes(records[nativePin === 'genesis' ? 0 : observedLength - 1])
+            })
+          // The usual claim opens without a renderer observation, before the control page supplies it.
+          else assert.equal((yield* second.host.open(workspaceId)).length, observedLength + 1)
+          const oldPin = yield* pins.read()
+          const missing = yield* Effect.result(second.host.open(workspaceId, observed))
+          assert.equal(missing.failure.code, 'snapshot-history-required')
+          // A genuinely signed alternate chain with the same genesis is not a bridge to this snapshot.
+          const fork = yield* makeRecords(first.custody, prepared, records.length)
+          const forkedProof = yield* Effect.result(
+            second.host.open(workspaceId, observed, [page(fork, prepared.genesisHashHex, 0)])
+          )
+          assert.equal(forkedProof.failure.code, 'local-evidence-conflict')
+          const rollback = yield* Effect.result(
+            second.host.open(workspaceId, observed, [
+              page(records.slice(0, observedLength), prepared.genesisHashHex, 0)
+            ])
+          )
+          assert.equal(rollback.failure.code, 'local-evidence-conflict')
+          const gap = yield* Effect.result(
+            second.host.open(workspaceId, observed, [page(records, prepared.genesisHashHex, 1)])
+          )
+          assert.equal(gap.failure.code, 'invalid-ledger')
+          assert.equal(
+            historyDb(
+              secondDirectory,
+              (db) => db.prepare('SELECT COUNT(*) AS n FROM records').get().n
+            ),
+            1
+          )
+          const retainedPin = yield* pins.read()
+          assert.equal(retainedPin.length, oldPin.length)
+          assert.ok(retainedPin.head.equals(oldPin.head))
+          const proof = [
+            page(records, prepared.genesisHashHex, 0, 1),
+            page(records, prepared.genesisHashHex, 1)
+          ]
+          if (nativePin) {
+            const conflictingObserved = {
+              ...observed,
+              headHash:
+                observedLength === 1
+                  ? '00'.repeat(32)
+                  : hex(hashRecordBytes(fork[observedLength - 1]).toBytes())
+            }
+            const rejected = yield* Effect.result(
+              second.host.open(workspaceId, conflictingObserved, proof)
+            )
+            assert.equal(rejected.failure.code, 'local-evidence-conflict')
+            const afterRejected = yield* pins.read()
+            assert.equal(
+              afterRejected.length,
+              oldPin.length,
+              'failed open must not advance durable pin'
+            )
+            assert.ok(afterRejected.head.equals(oldPin.head))
+            assert.equal(
+              historyDb(
+                secondDirectory,
+                (db) => db.prepare('SELECT COUNT(*) AS n FROM records').get().n
+              ),
+              1
+            )
+            // A failed observed open must not leave a bridge that makes an unobserved open succeed.
+            const unobserved = yield* Effect.result(second.host.open(workspaceId))
+            assert.equal(unobserved.failure.code, 'snapshot-history-required')
+            const beforeFetch = yield* Effect.result(
+              second.host.open(workspaceId, conflictingObserved)
+            )
+            assert.equal(
+              beforeFetch.failure.code,
+              nativePin === 'genesis' ? 'snapshot-history-required' : 'local-evidence-conflict'
+            )
+          }
+          const status = yield* second.host.open(workspaceId, observed, proof)
+          assert.equal(status.length, observedLength + 1)
+          assert.equal(status.continuityPending, false)
+          // Even a real head from a sibling fork at n cannot replace the retained observation.
+          const conflict = yield* Effect.result(
+            second.host.open(workspaceId, {
+              ...observed,
+              headHash:
+                observedLength === 1
+                  ? '00'.repeat(32)
+                  : hex(hashRecordBytes(fork[observedLength - 1]).toBytes())
+            })
+          )
+          assert.equal(conflict.failure.code, 'local-evidence-conflict')
+          assert.equal((yield* second.host.status(workspaceId)).length, observedLength + 1)
+        })
+      )
+      await execute(
+        Effect.gen(function* () {
+          const second = yield* ownerWithHost(secondDirectory)
+          const status = yield* second.host.open(workspaceId, observed)
+          assert.equal(status.length, observedLength + 1)
+          assert.equal(status.continuityPending, false)
+        })
+      )
+    })
+  }
 
 void test('a snapshot-joined desktop installs only the current epoch and derives older content from the verified history chain', async (t) => {
   const directory = await fixture(t),
