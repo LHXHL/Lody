@@ -271,6 +271,22 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         return yield* fail('member_removed')
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
+      const readObservation = Effect.fnUntraced(function* (expected: ObservedCheckpoint) {
+        if (
+          !expected ||
+          expected.genesisHash !== creation.genesisHash ||
+          !Number.isSafeInteger(expected.length) ||
+          expected.length < 1 ||
+          !/^[0-9a-f]{64}$/.test(expected.headHash)
+        )
+          return yield* fail('local-evidence-conflict')
+        const point = {
+          head: Result.getOrThrow(Bytes.recordHash(unhex(expected.headHash))),
+          length: expected.length
+        }
+        return point
+      })
+      const openingObservation = observed ? yield* readObservation(observed) : undefined
       const invitation = creation.invitation
       const initialOrigin: Parameters<typeof LedgerFeed.layer>[0]['origin'] = invitation
         ? { kind: 'snapshot', snapshot: invitation.snapshot }
@@ -369,6 +385,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const installedStore = Context.get(storeContext, InstalledKeyStore)
         let pin = yield* pins.read().pipe(Effect.mapError(pinFailure))
         let minimumPin = pin
+        // Reject contradictions already known locally before requesting any prefix proof.
+        if (
+          openingObservation &&
+          [pin, initialPoint].some(
+            (known) =>
+              known?.length === openingObservation.length &&
+              !known.head.equals(openingObservation.head)
+          )
+        )
+          return yield* fail('local-evidence-conflict')
         const rows = () =>
           db
             .prepare('SELECT position,record,locator FROM records ORDER BY position')
@@ -385,7 +411,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         let prefixProof: import('@lody/e2ee-core/protocol').LedgerView | undefined
         const proveSnapshotPrefix = Effect.fnUntraced(function* (
           point: { head: ReturnType<typeof hashRecordBytes>; length: number },
-          pages?: readonly E2eeWorkspaceHistoryPage[]
+          pages?: readonly E2eeWorkspaceHistoryPage[],
+          additionalPoint?: typeof point
         ) {
           if (!invitation) return yield* fail('local-evidence-conflict')
           if (!prefixProof) {
@@ -428,6 +455,21 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               return yield* fail('local-evidence-conflict')
             if (!Result.getOrThrow(hasVerifiedCheckpoint(replayed, point)))
               return yield* fail('local-evidence-conflict')
+            // Validate the caller's observation as well as the original native pin before
+            // committing anything. A newer observation beyond local history remains a
+            // pending restriction, as in observe(); it grants no current authority.
+            if (additionalPoint && additionalPoint.length <= endpoint.length) {
+              const evidence =
+                additionalPoint.length <= replayed.length
+                  ? replayed
+                  : yield* extendLedgerEffect(
+                      replayed,
+                      suffix.map((row) => row.record),
+                      endpoint
+                    )
+              if (!Result.getOrThrow(hasVerifiedCheckpoint(evidence, additionalPoint)))
+                return yield* fail('local-evidence-conflict')
+            }
             // No proof or conflicting evidence may mutate originals or the durable pin.
             yield* sql(() => {
               db.exec('BEGIN IMMEDIATE')
@@ -460,7 +502,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return undefined
         })
         if (pin && pin.length < initialCount) {
-          yield* proveSnapshotPrefix(pin, proof)
+          yield* proveSnapshotPrefix(pin, proof, openingObservation)
           // Originals are durable before the guard advances across the proved prefix.
           yield* pins.write(initialPoint)
           pin = minimumPin = initialPoint
@@ -672,18 +714,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           expected: ObservedCheckpoint,
           pages?: readonly E2eeWorkspaceHistoryPage[]
         ) {
-          if (
-            !expected ||
-            expected.genesisHash !== creation.genesisHash ||
-            !Number.isSafeInteger(expected.length) ||
-            expected.length < 1 ||
-            !/^[0-9a-f]{64}$/.test(expected.headHash)
-          )
-            return yield* fail('local-evidence-conflict')
-          const point = {
-            head: Result.getOrThrow(Bytes.recordHash(unhex(expected.headHash))),
-            length: expected.length
-          }
+          const point = yield* readObservation(expected)
           if (minimumPin?.length === point.length && !minimumPin.head.equals(point.head))
             return yield* fail('local-evidence-conflict')
           const current = (yield* feed.current()).view

@@ -1913,7 +1913,7 @@ void test('a second personal desktop verifies its pinned snapshot, installs thro
 })
 
 for (const observedLength of [1, 2])
-  for (const nativePin of [false, true]) {
+  for (const nativePin of [false, true, ...(observedLength === 2 ? ['genesis'] : [])]) {
     void test(`snapshot join proves an earlier observation at ${observedLength} (native pin: ${nativePin}) and reopens offline`, async (t) => {
       const directory = await fixture(t)
       const secondDirectory = join(directory, 'second-desktop')
@@ -1967,8 +1967,8 @@ for (const observedLength of [1, 2])
           )
           if (nativePin)
             yield* pins.write({
-              length: observedLength,
-              head: hashRecordBytes(records[observedLength - 1])
+              length: nativePin === 'genesis' ? 1 : observedLength,
+              head: hashRecordBytes(records[nativePin === 'genesis' ? 0 : observedLength - 1])
             })
           // The usual claim opens without a renderer observation, before the control page supplies it.
           else assert.equal((yield* second.host.open(workspaceId)).length, observedLength + 1)
@@ -2005,6 +2005,43 @@ for (const observedLength of [1, 2])
             page(records, prepared.genesisHashHex, 0, 1),
             page(records, prepared.genesisHashHex, 1)
           ]
+          if (nativePin) {
+            const conflictingObserved = {
+              ...observed,
+              headHash:
+                observedLength === 1
+                  ? '00'.repeat(32)
+                  : hex(hashRecordBytes(fork[observedLength - 1]).toBytes())
+            }
+            const rejected = yield* Effect.result(
+              second.host.open(workspaceId, conflictingObserved, proof)
+            )
+            assert.equal(rejected.failure.code, 'local-evidence-conflict')
+            const afterRejected = yield* pins.read()
+            assert.equal(
+              afterRejected.length,
+              oldPin.length,
+              'failed open must not advance durable pin'
+            )
+            assert.ok(afterRejected.head.equals(oldPin.head))
+            assert.equal(
+              historyDb(
+                secondDirectory,
+                (db) => db.prepare('SELECT COUNT(*) AS n FROM records').get().n
+              ),
+              1
+            )
+            // A failed observed open must not leave a bridge that makes an unobserved open succeed.
+            const unobserved = yield* Effect.result(second.host.open(workspaceId))
+            assert.equal(unobserved.failure.code, 'snapshot-history-required')
+            const beforeFetch = yield* Effect.result(
+              second.host.open(workspaceId, conflictingObserved)
+            )
+            assert.equal(
+              beforeFetch.failure.code,
+              nativePin === 'genesis' ? 'snapshot-history-required' : 'local-evidence-conflict'
+            )
+          }
           const status = yield* second.host.open(workspaceId, observed, proof)
           assert.equal(status.length, observedLength + 1)
           assert.equal(status.continuityPending, false)

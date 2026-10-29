@@ -52,8 +52,9 @@ A personal-device invitation can start the native runtime at snapshot `m` after 
 control page already observed `n < m`. The compact snapshot has no hashes for that
 prefix. Main requests the missing public history outside the account lock; the host
 replays its signed originals from the retained genesis, checks the snapshot head,
-count and complete-state digest, and proves the older checkpoint before retaining
-those originals. Only then may an older native pin advance to the snapshot. Reopening
+count and complete-state digest, and checks the original native pin and renderer
+observation together before retaining any proof originals or advancing the pin.
+Same-length conflicting heads fail before history is requested. Reopening
 uses that retained proof offline. A missing proof requests history; a conflicting
 proof remains `local-evidence-conflict`. Neither case resets identity or checkpoints,
 and bridging does not change the runtime view's endorsed-snapshot provenance.
