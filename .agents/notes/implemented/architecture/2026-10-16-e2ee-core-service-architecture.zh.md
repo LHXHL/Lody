@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2053)
+PR: [Browser ledger/original stores #2053](https://github.com/LodyAI/Lody/pull/2053) · [Browser custody/key journals #2060](https://github.com/LodyAI/Lody/pull/2060)
 
 [English](2026-10-16-e2ee-core-service-architecture.md)
 
