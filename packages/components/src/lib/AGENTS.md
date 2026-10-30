@@ -92,6 +92,8 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 - Native file/PNG sharing uses complete authorized bytes, never host paths. Preserve
   transfer limits; stage isolated cache files and clean up after handoff, failure, or
   cancellation. Report cancellation separately; retain the preview and selection.
+- Before changing conversation Markdown/PNG exports, read the
+  [conversation export rules](../AGENTS.md#conversation-exports).
 
 ## File identity, caching, and errors
 
