@@ -567,6 +567,64 @@ it('closes only its captured portable reader and spares the workspace reader', a
   expect([...readers]).toEqual(['workspace-reader']);
 });
 
+it('releases exactly one count of a legacy window-scoped control reader', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  // Electron main counts acquisitions per window and workspace. The content
+  // runtime in this same window already holds one count.
+  let count = 1;
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      count += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async () => {
+      count = Math.max(0, count - 1);
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(count).toBe(2);
+  await act(async () => root.unmount());
+  expect(count).toBe(1);
+});
+
+it('joins one legacy reader close when member removal and unmount overlap', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  // The content runtime in this same window holds one Electron count.
+  let count = 1;
+  let calls = 0;
+  const removalClose = Promise.withResolvers<void>();
+  fixture.port.runtime = {
+    recordCreated: async () => {},
+    open: async () => {
+      count += 1;
+      return { ...local.status, readerOwner: 'account-owner' };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => {
+      throw new Error('e2ee_member_removed');
+    },
+    refresh: async () => local.status,
+    close: async () => {
+      calls += 1;
+      count = Math.max(0, count - 1);
+      await removalClose.promise;
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(calls).toBe(1);
+  await act(async () => root.unmount());
+  await act(async () => removalClose.resolve());
+  expect(calls).toBe(1);
+  expect(count).toBe(1);
+});
+
 it('fences the preallocated control reader before a cold open settles', async () => {
   fixture.port = displayPort(async () => [] as never);
   delete fixture.port.memberProfiles;
