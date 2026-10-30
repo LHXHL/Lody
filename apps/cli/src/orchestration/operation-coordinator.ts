@@ -328,6 +328,10 @@ export class LodyOperationCoordinator {
     );
   }
 
+  hasTurnWorkForRequester(sessionId: SessionId): boolean {
+    return this.store?.hasTurnWorkForRequester(this.options.workspaceId, sessionId) ?? true;
+  }
+
   stop(): Promise<void> {
     if (this.startupRetry) clearTimeout(this.startupRetry);
     this.startupRetry = undefined;
