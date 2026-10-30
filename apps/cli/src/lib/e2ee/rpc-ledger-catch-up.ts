@@ -150,3 +150,17 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
         )
       );
 }
+
+type RequestOpener = (machineId: string, frameHex: string) => Effect.Effect<unknown, unknown>;
+
+/** Dispatch and feature requests share one catch-up budget and wait. */
+export function withLedgerCatchUp<
+  N extends { readonly openDispatch: RequestOpener; readonly openFeature: RequestOpener },
+>(native: N, wrap: ReturnType<typeof makeLedgerCatchUp>): N {
+  // Each wrapper keeps exactly its opener's success and failure types.
+  return {
+    ...native,
+    openDispatch: wrap(native.openDispatch),
+    openFeature: wrap(native.openFeature),
+  } as N;
+}

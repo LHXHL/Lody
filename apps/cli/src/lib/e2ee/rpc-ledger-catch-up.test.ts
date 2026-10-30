@@ -4,7 +4,11 @@ import { Bytes, ContentError, sealRpcRequestContent } from '@lody/e2ee-core/prot
 import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
 import { copyEpochKeyBytes } from '../../../../../packages/e2ee-core/src/internal/foundation/epoch-key';
 import { encryptedRpcFixture } from '../../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
-import { makeLedgerCatchUp, type LedgerCatchUpEvent } from './rpc-ledger-catch-up';
+import {
+  makeLedgerCatchUp,
+  withLedgerCatchUp,
+  type LedgerCatchUpEvent,
+} from './rpc-ledger-catch-up';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 afterEach(() => {
@@ -120,5 +124,39 @@ describe('dispatch open after an epoch rotation', () => {
     m.release();
     expect((await Promise.all(opened)).every(Exit.isSuccess)).toBe(true);
     expect(m.catchUps()).toBe(1);
+  });
+});
+
+describe('feature requests share the dispatch catch-up', () => {
+  it('reopens a feature request sealed after rotation through the same budget', async () => {
+    const m = machine({ advance: true });
+    const f = m.f;
+    let featureOpens = 0;
+    let caughtUp = false;
+    const wrap = makeLedgerCatchUp({
+      genesis: hex(f.ledger.context.genesis.toBytes()),
+      resource: e2eeRpcResource,
+      ledger: f.ledger.ledger,
+      catchUp: async () => {
+        caughtUp = true;
+      },
+    });
+    const reject = () => Effect.fail(new ContentError({ code: 'unauthorized' }));
+    const native = withLedgerCatchUp(
+      {
+        openDispatch: (_machineId: string, _frameHex: string) => reject(),
+        openFeature: (_machineId: string, _frameHex: string) =>
+          Effect.suspend(() => {
+            featureOpens++;
+            return caughtUp ? Effect.succeed('feature') : reject();
+          }),
+        close: () => 'kept',
+      },
+      wrap
+    );
+    const frame = await m.seal(1);
+    expect(await Effect.runPromise(native.openFeature(f.machineId, frame))).toBe('feature');
+    expect(featureOpens).toBe(2);
+    expect(native.close()).toBe('kept');
   });
 });

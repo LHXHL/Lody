@@ -8,7 +8,7 @@ import {
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
-import { makeLedgerCatchUp } from './rpc-ledger-catch-up';
+import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
 import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
 import { getLogger } from '../../utils/logger';
 import { lazyExecutionJournal } from './agent-execution';
@@ -754,7 +754,7 @@ async function openWorkspaceOwned(
     Date.now
   );
   await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
-  // Both the realtime offer and the durable execution origin reopen dispatch frames.
+  // Realtime dispatch, the durable execution origin and feature requests reopen frames.
   const catchUpLedger = makeLedgerCatchUp({
     genesis: binding.genesisHash,
     resource: e2eeRpcResource,
@@ -764,7 +764,7 @@ async function openWorkspaceOwned(
     // Two epoch integers and an outcome only; never the frame or its plaintext.
     observe: (event) => getLogger('e2ee').warn('[e2ee] rpc request epoch rejected', event),
   });
-  const dispatchNative = { ...rpc, openDispatch: catchUpLedger(rpc.openDispatch) };
+  const dispatchNative = withLedgerCatchUp(rpc, catchUpLedger);
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
     rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
@@ -1297,7 +1297,7 @@ async function openWorkspaceOwned(
                       workspaceId: options.workspaceId,
                       genesis: binding.genesisHash,
                       machineId,
-                      native: rpc,
+                      native: dispatchNative,
                       journal: rpcJournal,
                       authorize: opened.executionAuthorization.authorizeOwnedExecution,
                       authorizeRead: opened.executionAuthorization.authorizeRead,
