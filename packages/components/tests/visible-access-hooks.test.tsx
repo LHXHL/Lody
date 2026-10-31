@@ -76,7 +76,12 @@ import {
   resolveSessionDetailVisibilityState,
   type SessionDetailPresenceState,
 } from '../src/lib/session-detail-presence';
-import { TestCloudPlatformProvider } from './test-platform';
+import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
+import { PlatformContext } from '@lody/platform/react';
+import type { PlatformProvider } from '@lody/platform';
+import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
+import { ENCRYPTED_SHARED_MACHINE_REFRESH_MS } from '../src/lib/encrypted-shared-machines';
+import { withoutEncryptedSharedMachines } from '../src/lib/visible-machine-index';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -708,4 +713,242 @@ describe('visible access hooks', () => {
       });
     });
   }
+});
+
+describe('encrypted shared machine visibility', () => {
+  const workspaceId = 'encrypted-team' as WorkspaceId;
+  const member = 'member-user';
+  const owner = 'owner-user';
+  type View = import('@lody/platform').E2eeMachineSharingView;
+  const view = (machineId: string, overrides: Partial<View> = {}): View => ({
+    machineId,
+    ownerMembershipId: '11'.repeat(16),
+    generation: '22'.repeat(16),
+    head: { revision: 1, digest: '33'.repeat(32) },
+    sharedWithTeam: true,
+    projects: ['shared-project'],
+    canManage: false,
+    signer: '44'.repeat(32),
+    needsResign: false,
+    ...overrides,
+  });
+  const machine = (id: string, ownerUserId: string): MachineMeta & MachineLegacyMetaFields => ({
+    id: id as MachineId,
+    name: id,
+    ownerUserId,
+    cliVersion: '0.1.0',
+    os: 'linux',
+    sessions: [],
+    localProjects: Object.fromEntries(
+      ['shared-project', 'private-project'].map((projectId) => [
+        projectId,
+        { id: projectId, name: projectId, rootPath: `/synthetic/${projectId}`, createdAtMs: 1 },
+      ])
+    ) as MachineMeta['localProjects'],
+  });
+
+  let container: HTMLDivElement;
+  let root: Root;
+  let store: Store;
+  let views: Map<string, View | Error>;
+  let reads: string[];
+  let snapshot: { machines: string[]; projects: string[]; managed?: string[] } | undefined;
+
+  let renderTree: (node: ReactNode) => Promise<void>;
+  const consumer: Record<string, string[]> = {};
+  function Consumer({ name, enabled }: { name: string; enabled: boolean }) {
+    const index = useVisibleMachineMetas({ includeMachineFlock: false, enabled });
+    useEffect(() => {
+      consumer[name] = [...index.machines.keys()].sort();
+    }, [index, name]);
+    return null;
+  }
+  function Probe() {
+    const machines = useVisibleMachineMetas({ includeMachineFlock: false });
+    const projects = useVisibleLocalProjectsFromMachineIndex(machines);
+    useEffect(() => {
+      snapshot = {
+        machines: [...machines.machines.keys()].sort(),
+        projects: [...projects.projects.keys()].sort(),
+        managed: [...withoutEncryptedSharedMachines(machines.machines, machines).keys()].sort(),
+      };
+    }, [machines, projects]);
+    return null;
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    store = createStore();
+    views = new Map();
+    reads = [];
+    snapshot = undefined;
+    queryMocks.machineRows = undefined;
+    queryMocks.localProjectRows = undefined;
+    store.set(userAtom, { id: member, name: 'Member', email: 'member@example.test' });
+    store.set(currentWorkspaceSlugAtom, workspaceId);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(workspaceContentModeAtom, {
+      accountId: member,
+      workspaceId,
+      workspaceSlug: workspaceId,
+      descriptor: { workspaceId, contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug: workspaceId,
+      contentMode: 'e2ee',
+      accountId: member,
+    } as WorkspaceRuntime);
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId('own-machine' as MachineId)]: machine('own-machine', member),
+      [getMachineRoomId('shared-machine' as MachineId)]: machine('shared-machine', owner),
+      [getMachineRoomId('private-machine' as MachineId)]: machine('private-machine', owner),
+      [getMachineRoomId('failing-machine' as MachineId)]: machine('failing-machine', owner),
+    });
+    views.set('shared-machine', view('shared-machine'));
+    views.set(
+      'private-machine',
+      view('private-machine', { sharedWithTeam: false, deniedReason: 'e2ee_machine_not_shared' })
+    );
+    views.set('failing-machine', new Error('e2ee_sharing_unavailable'));
+    const platform = {
+      ...TEST_CLOUD_PLATFORM,
+      e2eeWorkspaces: {
+        ...TEST_CLOUD_PLATFORM.e2eeWorkspaces,
+        runtime: {
+          readMachineSharing: async (id: string, machineId: string) => {
+            // Reads for another workspace are recorded apart and never share its views.
+            reads.push(id === workspaceId ? machineId : `${id}/${machineId}`);
+            const value = views.get(id === workspaceId ? machineId : `${id}/${machineId}`);
+            if (!value || value instanceof Error) throw value ?? new Error('missing');
+            return value;
+          },
+        },
+      },
+    } as unknown as PlatformProvider;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    renderTree = (node) =>
+      act(async () => {
+        root.render(
+          <PlatformContext.Provider value={platform}>
+            <Provider store={store}>{node}</Provider>
+          </PlatformContext.Provider>
+        );
+      });
+    await renderTree(<Probe />);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+  });
+
+  it('shows another member machine and its signed shared projects only when the verified view allows it', async () => {
+    // Selection and execution only: automatic catalog writers and machine-RPC surfaces
+    // (migration, bug reports, memory settings) never see the shared encrypted machine.
+    expect(snapshot?.managed).toEqual(['own-machine']);
+    expect(snapshot).toMatchObject({
+      machines: ['own-machine', 'shared-machine'],
+      projects: [
+        'own-machine:private-project',
+        'own-machine:shared-project',
+        'shared-machine:shared-project',
+      ],
+    });
+    // Own machines are never read through the sharing port.
+    expect(reads.sort()).toEqual(['failing-machine', 'private-machine', 'shared-machine']);
+  });
+
+  it('removes a withdrawn machine on the next ledger change and on the bounded refresh', async () => {
+    views.set(
+      'shared-machine',
+      view('shared-machine', { sharedWithTeam: false, deniedReason: 'e2ee_machine_not_shared' })
+    );
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(snapshot?.machines).toEqual(['own-machine']);
+    views.set('shared-machine', view('shared-machine'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
+    });
+    expect(snapshot?.machines).toEqual(['own-machine', 'shared-machine']);
+    // A read failure removes access immediately rather than keeping the old grant.
+    views.set('shared-machine', new Error('e2ee_sharing_unavailable'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
+    });
+    expect(snapshot?.machines).toEqual(['own-machine']);
+  });
+
+  it('hides a shared machine from a Guest, whom core denies', async () => {
+    views.set(
+      'shared-machine',
+      view('shared-machine', { deniedReason: 'e2ee_machine_not_shared' })
+    );
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(snapshot).toMatchObject({
+      machines: ['own-machine'],
+      projects: ['own-machine:private-project', 'own-machine:shared-project'],
+    });
+  });
+
+  it("keeps a consumer's shared machines when another consumer of the same store is disabled", async () => {
+    await renderTree(
+      <>
+        <Consumer name="a" enabled />
+        <Consumer name="b" enabled />
+      </>
+    );
+    expect(consumer.a).toEqual(['own-machine', 'shared-machine']);
+    await renderTree(
+      <>
+        <Consumer name="a" enabled />
+        <Consumer name="b" enabled={false} />
+      </>
+    );
+    expect(consumer.a).toEqual(['own-machine', 'shared-machine']);
+    // The remaining consumer still refreshes: withdrawal is observed on the interval.
+    views.set(
+      'shared-machine',
+      view('shared-machine', { sharedWithTeam: false, deniedReason: 'e2ee_machine_not_shared' })
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS);
+    });
+    expect(consumer.a).toEqual(['own-machine']);
+  });
+
+  it('stops reading once every consumer is disabled', async () => {
+    await renderTree(<Consumer name="a" enabled={false} />);
+    reads.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ENCRYPTED_SHARED_MACHINE_REFRESH_MS * 2);
+    });
+    await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
+    expect(reads).toEqual([]);
+    expect(consumer.a).toEqual([]);
+  });
+
+  it('does not carry shared machines across a workspace switch', async () => {
+    const other = 'encrypted-other' as WorkspaceId;
+    await act(async () => {
+      store.set(currentWorkspaceSlugAtom, other);
+      store.set(currentWorkspaceIdAtom, other);
+      store.set(workspaceContentModeAtom, {
+        accountId: member,
+        workspaceId: other,
+        workspaceSlug: other,
+        descriptor: { workspaceId: other, contentMode: 'e2ee', contentModeVersion: 1 },
+      } as never);
+      store.set(runtimeAtom, {
+        workspaceId: other,
+        workspaceSlug: other,
+        contentMode: 'e2ee',
+        accountId: member,
+      } as WorkspaceRuntime);
+    });
+    expect(snapshot?.machines).toEqual(['own-machine']);
+    expect(reads).toContain(`${other}/shared-machine`);
+  });
 });
