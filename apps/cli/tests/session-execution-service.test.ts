@@ -70,6 +70,7 @@ import {
   type ChatFailedReason,
   type LocalProjectId,
   type MachineFlockKey,
+  type ProjectRef,
   type MachineId,
   type SessionGoalMessage,
   type SessionHistoryInput,
@@ -2634,6 +2635,14 @@ describe('SessionExecutionService', () => {
     prepared?: boolean;
     create?: boolean;
     onPrompt?: (service: SessionExecutionService) => Promise<void>;
+    /** Requested by the turn message; untrusted input. */
+    project?: ProjectRef;
+    /** Synced Session meta; writable by any member. */
+    meta?: Record<string, unknown>;
+    /** Machine-held configuration of the live Session process. */
+    liveConfig?: { project?: ProjectRef; parentSessionId?: SessionId };
+    /** No live process: the turn restores one; started configurations are recorded. */
+    restore?: SessionConfig[];
   }) => {
     let history: Array<Record<string, unknown>> = [
       ...(options.earlierInputAuthor
@@ -2671,7 +2680,8 @@ describe('SessionExecutionService', () => {
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
       getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
+      getParentSessionId: () => options.liveConfig?.parentSessionId,
+      getExecutionScope: () => options.liveConfig ?? {},
       exec: vi.fn(async () => ''),
       terminate: vi.fn(async () => {}),
       updateGitIdentity: vi.fn(),
@@ -2679,8 +2689,10 @@ describe('SessionExecutionService', () => {
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
     let status = SessionStatusFactory.idle();
+    let restored = false;
     const sessionDoc = withHistoryPort({
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      // Read at call time, so a test can change synced metadata mid-turn.
+      getMetaState: vi.fn(async () => ({ isArchived: false, ...options.meta })),
       setStatus: vi.fn(async (next: typeof status) => {
         status = next;
       }),
@@ -2715,9 +2727,16 @@ describe('SessionExecutionService', () => {
           : [...history, entry];
       }),
       sessionManager: {
-        getSession: vi.fn(() => activeSession),
+        getSession: vi.fn(() => (options.restore && !restored ? null : activeSession)),
         getPendingSession: vi.fn(() => null),
-        createSession: vi.fn(),
+        createSession: vi.fn(async (config: SessionConfig) => {
+          // Like SessionManager, preparation rereads the Project group from synced metadata.
+          const current = options.meta?.projectRun as SessionConfig['projectRun'];
+          if (current) await config.authorizeExecutionInputs?.({ projectRun: current });
+          options.restore?.push({ ...config, projectRun: current ?? config.projectRun });
+          restored = true;
+          return activeSession;
+        }),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
         validateSessionCredentials: vi.fn(async () => {}),
@@ -2758,7 +2777,7 @@ describe('SessionExecutionService', () => {
         sessionId: options.sessionId as SessionId,
         machineId: 'machine-1',
         workspaceId: options.workspaceId ?? 'workspace-1',
-        project: undefined,
+        project: options.project,
         acpSessionConfig: { prompt: 'hi', cliType: 'builtin' as const, agentType: 'codex' },
         userTurnId: options.userTurnId ?? 'turn-user-1',
         userId: options.requesterUserId ?? 'user-1',
@@ -3446,6 +3465,195 @@ describe('SessionExecutionService', () => {
     'executes a signed durable turn through production Lody construction (%s)',
     runProductionSignedTurn
   );
+
+  describe('encrypted shared-project scope', () => {
+    const local = (id: string): ProjectRef => ({
+      kind: 'local',
+      localProjectId: id as LocalProjectId,
+    });
+    // A member granted only project p1 on this machine; the owner-signed policy decides.
+    const sharedOnly = (f: ReturnType<typeof encryptedExecutionFixture>, asked: unknown[][]) =>
+      makeEncryptedAgentExecution({
+        genesis: 'genesis',
+        workspaceId: 'workspace-1',
+        targetMachineId: 'machine-1',
+        journal: lazyExecutionJournal(f.filename, () => 100),
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: 'member',
+            expiresAt: 1000,
+          }),
+        authorizeExecution: (_workspaceId, _device, localProjectId) => {
+          asked.push([localProjectId]);
+          return Effect.succeed(
+            localProjectId === undefined || localProjectId === 'p1'
+              ? { _tag: 'Authorized' }
+              : { _tag: 'Denied', reason: 'e2ee_machine_not_shared' }
+          );
+        },
+      });
+    it.each([
+      ['the requested project', { project: local('p2') }],
+      [
+        'a live process whose request names a shared project',
+        {
+          project: local('p1'),
+          liveConfig: { project: local('p2') },
+        },
+      ],
+      ['Session meta while the request omits the project', { meta: { project: local('p2') } }],
+      ['a new conversation', { project: local('p2'), create: true }],
+      [
+        'a Project group member',
+        {
+          meta: {
+            projectRun: {
+              id: 'group',
+              name: 'Group',
+              root: 'group',
+              members: {
+                member: {
+                  o: 0,
+                  src: { kind: 'local', machineId: 'machine-1', localProjectId: 'p2' },
+                  placement: { kind: 'root', dir: 'p2' },
+                  path: 'p2',
+                  base: 'main',
+                },
+              },
+            },
+          },
+        },
+      ],
+    ] as const)('never prompts a member on an unshared project from %s', async (_name, scope) => {
+      const f = encryptedExecutionFixture();
+      const asked: unknown[][] = [];
+      const submissions: string[] = [];
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: sharedOnly(f, asked),
+          ...scope,
+          onPrompt: async () => {
+            submissions.push('hi');
+          },
+        });
+        expect(submissions).toEqual([]);
+        expect(asked).toContainEqual(['p2']);
+        expect(result.failureMessages).toEqual([
+          expect.stringContaining('e2ee_machine_not_shared'),
+        ]);
+      } finally {
+        f.close();
+      }
+    });
+    it('restores from the metadata it authorized, even if synced metadata changes meanwhile', async () => {
+      const f = encryptedExecutionFixture();
+      const meta: Record<string, unknown> = {};
+      const started: SessionConfig[] = [];
+      const asked: unknown[][] = [];
+      const shared = sharedOnly(f, asked);
+      // The member rewrites synced metadata while the claim is authorizing.
+      const gate = {
+        ...shared,
+        claim: (intent: Parameters<typeof shared.claim>[0]) =>
+          Effect.sync(() => {
+            meta.project = local('p2');
+          }).pipe(Effect.andThen(shared.claim(intent))),
+      };
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: gate,
+          meta,
+          restore: started,
+        });
+        expect(asked).toEqual([[undefined]]);
+        // Before the fix the restore re-read the rewritten metadata and resolved p2.
+        expect(result.failureMessages.join('\n')).not.toContain('p2');
+        expect(started).toHaveLength(1);
+        expect(started[0]?.project).toBeUndefined();
+      } finally {
+        f.close();
+      }
+    });
+    it('refuses a Project group member added to synced metadata after authorization', async () => {
+      const f = encryptedExecutionFixture();
+      const group = (...ids: string[]) => ({
+        id: 'group',
+        name: 'Group',
+        root: 'group',
+        members: Object.fromEntries(
+          ids.map((id, o) => [
+            id,
+            {
+              o,
+              src: { kind: 'local', machineId: 'machine-1', localProjectId: id },
+              placement: { kind: 'root', dir: id },
+              path: id,
+              base: 'main',
+            },
+          ])
+        ),
+      });
+      const meta: Record<string, unknown> = { projectRun: group('p1') };
+      const started: SessionConfig[] = [];
+      const asked: unknown[][] = [];
+      const shared = sharedOnly(f, asked);
+      const gate = {
+        ...shared,
+        claim: (intent: Parameters<typeof shared.claim>[0]) =>
+          shared.claim(intent).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                meta.projectRun = group('p1', 'p2');
+              })
+            )
+          ),
+      };
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'shared-project-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: gate,
+          meta,
+          restore: started,
+        });
+        expect(asked).toEqual([['p1']]);
+        // Before the fix the session manager adopted the reread group, including p2.
+        expect(started).toEqual([]);
+        expect(result.failureMessages.join('\n')).toContain('e2ee_machine_not_shared');
+      } finally {
+        f.close();
+      }
+    });
+    it('still prompts on the shared project and in a projectless conversation', async () => {
+      for (const scope of [{ project: local('p1') }, {}]) {
+        const f = encryptedExecutionFixture();
+        const submissions: string[] = [];
+        try {
+          await runSilentPromptTurn({
+            sessionId: 'shared-project-session',
+            hasPromptEventsForTurn: true,
+            prepared: true,
+            encryptedExecution: sharedOnly(f, []),
+            ...scope,
+            onPrompt: async () => {
+              submissions.push('hi');
+            },
+          });
+          expect(submissions).toEqual(['hi']);
+        } finally {
+          f.close();
+        }
+      }
+    });
+  });
 
   it('keeps a snapshot turn pending until its original signed update becomes available', async () => {
     const f = encryptedExecutionFixture();

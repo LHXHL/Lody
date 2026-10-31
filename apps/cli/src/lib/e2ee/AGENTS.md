@@ -18,6 +18,8 @@
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Offline open/status; cloud I/O stays in cloud-cli-port.
   Distinguish damaged history/pins; never reset trusted pins from remote hints.
+- Encrypted claims authorize every machine-resolved local project the turn reaches, never
+  the request alone. [Scope](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#project-scope-at-the-receiving-machine).
 - Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
   RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
   never network-retry.
@@ -117,18 +119,8 @@
 
 ## Catalog and Fleet containment
 
-- `local-workspace-catalog.ts`: keep encrypted discovery in account/machine-bound
-  `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
-  Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
-  the sidecar or account/machine-bound `.e2ee-invalid` marker.
-- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
-  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
-  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
-  Persist ordinary remote-list results; return degraded receipts with current auth/revocation
-  checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
-  writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
-  v1 fields; stale sidecars cannot bootstrap. Fleet keeps scoped recoverable issues, bounded
-  retries and pending signature until healthy receipt.
+- Encrypted workspace catalog rules bind `../local-workspace-catalog.ts`; see
+  [lib rules](../AGENTS.md#encrypted-workspace-catalog).
 
 - Same-context `creating=-1` means `prepare-superseded`; other errors stay errors. Main
   archives only the matching all-null unsigned attempt before fresh consent. Keep CLI originals.
