@@ -287,7 +287,7 @@ export interface CreateAgentConfig {
   forkSessionTurnId?: string;
   abortSignal?: AbortSignal;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
-  onUpdateMessage: (message: AcpSessionNotification) => void;
+  onUpdateMessage: (message: AcpSessionNotification, generation?: string) => void;
   onRequestPermission: (
     requestId: string,
     request: RequestPermissionRequest
@@ -323,6 +323,7 @@ export type AgentStartConfig = {
 
 export type SessionTerminatedEvent = {
   sessionId: SessionId;
+  configurationGeneration?: string;
   exitCode?: number;
   [key: string]: unknown;
 };
@@ -333,7 +334,11 @@ interface SessionManagerEvents {
   error: (error: SessionErrorEvent) => void;
   exit: (exit: SessionExitEvent) => void;
   terminated: (exit: SessionTerminatedEvent) => void;
-  onACPUpdateMessage: (sessionId: SessionId, message: AcpSessionNotification) => void;
+  onACPUpdateMessage: (
+    sessionId: SessionId,
+    message: AcpSessionNotification,
+    generation?: string
+  ) => void;
   onUsageUpdate: (event: {
     sessionId: SessionId;
     acpSessionId: ACPSessionId;
@@ -733,8 +738,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       forkSessionTurnId: options?.forkSessionTurnId,
       abortSignal: options?.abortSignal,
       onStartupStage: options?.onStartupStage,
-      onUpdateMessage: (update) => {
-        this.emit('onACPUpdateMessage', sessionId, update);
+      onUpdateMessage: (update, generation) => {
+        this.emit('onACPUpdateMessage', sessionId, update, generation);
       },
       onRequestPermission: (requestId, request) => {
         if (!this.requestPermissionHandler) {
@@ -2063,6 +2068,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const terminatedEvent: SessionTerminatedEvent = {
         sessionId: event.sessionId,
         exitCode: event.exitCode,
+        configurationGeneration: event.configurationGeneration,
       };
       this.emit('terminated', terminatedEvent);
     };

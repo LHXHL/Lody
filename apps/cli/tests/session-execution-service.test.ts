@@ -103,6 +103,7 @@ import { operationInboxLegacy } from '../src/orchestration/inbox/legacy';
 import { InboxExecutionRejected } from '../src/orchestration/inbox/admission-failure';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { applyAcpSessionRunConfig } from '../src/session/acp-session-config-applier';
+import { AcpConfiguration, AcpConfigurationError } from '../src/agent/acp-configuration';
 import { Session } from '../src/session/session';
 import {
   findNextDispatchableUserTurn,
@@ -330,7 +331,8 @@ const createBaseDeps = (
     getActiveTurnId: vi.fn(() => undefined),
     clearActiveTurnId: vi.fn(() => {}),
     buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
-    applyAcpModeAndModel: vi.fn(async () => {}),
+    isAcpConfigurationConfirmed: () => true,
+    applyAcpModeAndModel: vi.fn(() => Effect.void),
     createAssistantEntryForTurn: vi.fn(async () => {}),
     syncSessionBranchName: vi.fn(async () => null),
     turnFinalization: {
@@ -624,6 +626,96 @@ describe('SessionExecutionService', () => {
     expect([...runningChildren]).toEqual(['child-2']);
     expect(deps.getActiveTurnId(request.sessionId)).toBe('parent-1');
   });
+  it.each(['changed', 'unknown', 'replaced'] as const)(
+    'rechecks %s configuration at the actual steer submission boundary',
+    async (change) => {
+      const entered = createDeferred<void>();
+      const release = createDeferred<void>();
+      let mode = 'plan';
+      let confirmed = true;
+      const submitted: string[] = [];
+      const agentClient = {
+        configurationGeneration: 'connection-1',
+        isCreated: () => true,
+        getAcknowledgedSteerCapability: () => ({ configPolicy: 'apply', upstreamTurn: 'same' }),
+        findSteerConfigMismatch: () => (mode === 'plan' ? null : 'mode'),
+        steerPrompt: () => {
+          submitted.push(mode);
+          return {
+            completion: Promise.resolve(),
+            outcome: Promise.resolve({ outcome: 'applied', application: { release() {} } }),
+          };
+        },
+      };
+      let history: SessionHistoryInput[] = [
+        {
+          id: 'guide',
+          role: 'user',
+          userId: 'user',
+          timestamp: '2026-10-31T00:00:00Z',
+          status: 'pending_apply',
+          inputConfig: { prompt: 'guide', modeId: 'plan' },
+          items: [{ type: 'text', text: 'guide' }],
+        },
+      ];
+      const sessionDoc = withHistoryPort({
+        getHistory: () => history,
+        updateHistory: async (update: (value: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        },
+      });
+      const deps = createBaseDeps({
+        isAcpConfigurationConfirmed: () => confirmed,
+        workspaceDocument: {
+          repo: { upsertDocMeta: vi.fn(async () => {}), getDocMeta: vi.fn(async () => undefined) },
+          getOrCreateSessionDoc: async () => sessionDoc,
+        } as unknown as LoroDocumentManager,
+        buildAcpPromptBlocks: async () => {
+          entered.resolve();
+          await release.promise;
+          return [{ type: 'text', text: 'guide' }];
+        },
+      });
+      const service = new SessionExecutionService(deps);
+      const sessionId = 'steer-config-boundary' as SessionId;
+      const run = service['createPromptHandoffRun']({
+        turnId: 'assistant:source',
+        promptPromise: new Promise(() => {}),
+      });
+      service['turnRuntimeBySession'].set(sessionId, {
+        sessionId,
+        turnId: run.turnId,
+        userTurnId: 'source',
+        session: { agentClient, acpSessionId: 'acp-1' },
+        activePromptRun: run,
+        promptStarted: true,
+        promptInFlight: true,
+        cancelRequested: false,
+      } as never);
+      const pending = service.steerSession({
+        sessionId,
+        expectedTurnId: run.turnId,
+        userTurnId: 'guide',
+        userId: 'user',
+        timestamp: '2026-10-31T00:00:00Z',
+        inputConfig: { prompt: 'guide', modeId: 'plan' },
+      });
+      await entered.promise;
+      if (change === 'changed') mode = 'default';
+      if (change === 'unknown') confirmed = false;
+      if (change === 'replaced') agentClient.configurationGeneration = 'connection-2';
+      release.resolve();
+      const result = await pending;
+      expect(submitted).toEqual([]);
+      expect(result).toMatchObject({
+        applied: false,
+        disposition: change === 'changed' ? 'unsupported' : 'error',
+      });
+      expect(result.recoveryOwned).toBe(true);
+      expect(history[0]?.status).toBe(change === 'changed' ? 'pending' : 'failed');
+    }
+  );
+
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const frozenInput = {
       prompt: 'ROLE_INSTRUCTION\n\nchange direction',
@@ -639,6 +731,7 @@ describe('SessionExecutionService', () => {
     const cancel = vi.fn(async () => {});
     const agentClient = {
       isCreated: vi.fn(() => true),
+      findSteerConfigMismatch: () => null,
       getAcknowledgedSteerCapability: vi.fn(() => ({
         provider: 'claudeCode',
         appliedNotificationMethod: 'claude/steerApplied',
@@ -729,7 +822,7 @@ describe('SessionExecutionService', () => {
     expect(steerPrompt).toHaveBeenCalledWith('acp-steer', [
       { type: 'text', text: frozenInput.prompt },
     ]);
-    expect(deps.applyAcpModeAndModel).toHaveBeenCalledOnce();
+    expect(deps.applyAcpModeAndModel).not.toHaveBeenCalled();
     expect(steerPrompt.mock.invocationCallOrder[0]).toBeLessThan(
       upsertDocMeta.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY
     );
@@ -863,6 +956,7 @@ describe('SessionExecutionService', () => {
     });
     const agentClient = {
       isCreated: vi.fn(() => true),
+      findSteerConfigMismatch: () => null,
       getAcknowledgedSteerCapability: vi.fn(() => ({
         provider: 'claudeCode',
         appliedNotificationMethod: 'claude/steerApplied',
@@ -1077,6 +1171,7 @@ describe('SessionExecutionService', () => {
       }));
       const agentClient = {
         isCreated: vi.fn(() => true),
+        findSteerConfigMismatch: () => null,
         getAcknowledgedSteerCapability: vi.fn(() => ({
           provider: 'claudeCode',
           appliedNotificationMethod: 'claude/steerApplied',
@@ -1243,6 +1338,7 @@ describe('SessionExecutionService', () => {
       sessionId,
       turnId: 'assistant:user-1',
       session: {
+        findSteerConfigMismatch: () => null,
         agentClient: { getAcknowledgedSteerCapability: vi.fn(() => null) },
         acpSessionId: 'acp-no-steer' as ACPSessionId,
       },
@@ -1287,6 +1383,7 @@ describe('SessionExecutionService', () => {
       turnId: 'assistant:user-1',
       session: {
         agentClient: {
+          findSteerConfigMismatch: () => null,
           getAcknowledgedSteerCapability: vi.fn(() => ({
             provider: 'claudeCode',
             appliedNotificationMethod: 'claude/steerApplied',
@@ -2056,6 +2153,7 @@ describe('SessionExecutionService', () => {
       userTurnId: 'user-1',
       session: {
         agentClient: {
+          findSteerConfigMismatch: () => null,
           getAcknowledgedSteerCapability: vi.fn(() => ({
             provider: 'claudeCode',
             appliedNotificationMethod: 'claude/steerApplied',
@@ -2100,10 +2198,8 @@ describe('SessionExecutionService', () => {
   it.each([
     ['document', 'stop'],
     ['blocks', 'stop'],
-    ['config', 'stop'],
     ['document', 'complete'],
     ['blocks', 'complete'],
-    ['config', 'complete'],
   ] as const)('releases the steer lane during stalled %s on %s', async (stage, ending) => {
     const sessionId = 'session-steer-waits' as SessionId;
     let meta: Partial<SessionMeta> = {
@@ -2145,13 +2241,13 @@ describe('SessionExecutionService', () => {
       isCreated: () => true,
       cancel: async () => {},
       pendingPromptCompletion: null,
+      findSteerConfigMismatch: () => null,
       getAcknowledgedSteerCapability: () => ({ configPolicy: 'apply', upstreamTurn: 'handoff' }),
       steerPrompt: () => {
         throw new Error('A stopped preparation must never submit');
       },
       setSessionMode: async () => {
         mutations.push('mode');
-        if (stage === 'config') await block();
       },
       unstable_setSessionModel: async () => {
         mutations.push('model');
@@ -2171,14 +2267,8 @@ describe('SessionExecutionService', () => {
         if (stage === 'blocks') await block();
         return [{ type: 'text', text: 'guide' }];
       },
-      applyAcpModeAndModel: async (_session, config, options) => {
-        await applyAcpSessionRunConfig({
-          session: session as never,
-          config,
-          signal: options?.signal,
-          logger: createSilentLogger(),
-        });
-      },
+      applyAcpModeAndModel: () =>
+        Effect.die(new Error('Steer must not configure the active agent')),
     });
     const service = new SessionExecutionService(deps);
     const run = service['createPromptHandoffRun']({
@@ -8832,20 +8922,39 @@ describe('SessionExecutionService', () => {
         buildAcpPromptBlocks: vi.fn(async ({ inputBlocks }) => inputBlocks as ContentBlock[]),
         processMessageQueue: vi.fn(async () => {}),
       });
-      deps.applyAcpModeAndModel = vi.fn(async (targetSession, config, context) => {
-        if (context.basedOnUserTurnId === 'turn-pre-prompt-interrupt') {
-          firstConfigSignal = context.signal;
-        }
-        try {
-          await applyAcpSessionRunConfig({
-            session: targetSession,
-            config,
-            logger: createSilentLogger(),
-            signal: context.signal,
-          });
-        } finally {
-          if (context.basedOnUserTurnId === userTurnId) firstConfigFinished.resolve();
-        }
+      deps.applyAcpModeAndModel = vi.fn((targetSession, config, context) => {
+        const client = targetSession.agentClient as AgentClient;
+        const values: Record<string, string | boolean> = {};
+        return applyAcpSessionRunConfig(config).pipe(
+          Effect.provideService(AcpConfiguration, {
+            options: [],
+            read: Effect.sync(() => ({
+              acpSessionId: targetSession.acpSessionId as ACPSessionId,
+              configOptionValues: values,
+            })),
+            setMode: () => Effect.void,
+            setModel: () => Effect.void,
+            setOption: (id, value) =>
+              Effect.tryPromise({
+                try: async (signal) => {
+                  if (context.basedOnUserTurnId === userTurnId) firstConfigSignal = signal;
+                  await client.setSessionConfigOption(
+                    targetSession.acpSessionId as ACPSessionId,
+                    id,
+                    value
+                  );
+                  values[id] = value;
+                },
+                catch: (error) => error as never,
+              }),
+          }),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (context.basedOnUserTurnId === userTurnId) firstConfigFinished.resolve();
+            })
+          ),
+          Effect.asVoid
+        );
       });
 
       const service = new SessionExecutionService(deps);
@@ -11627,6 +11736,7 @@ describe('SessionExecutionService goal control', () => {
     const failures: string[] = [];
     const failed = createDeferred<void>();
     const delivered: Array<unknown> = [];
+    let retired = false;
     let goalStatus = 'active';
     const controlGoal = async (action: string) => {
       goalStatus = action;
@@ -11653,6 +11763,9 @@ describe('SessionExecutionService goal control', () => {
       exec: async () => '',
       updateGitIdentity: () => {},
       applyExecutionPlaneLimits: async () => {},
+      terminate: async () => {
+        retired = true;
+      },
     };
     const sessionDoc = withHistoryPort({
       getMetaState: async () => ({
@@ -11694,6 +11807,7 @@ describe('SessionExecutionService goal control', () => {
       failures,
       failed,
       goalStatus: () => goalStatus,
+      retired: () => retired,
     };
   };
 
@@ -11703,6 +11817,20 @@ describe('SessionExecutionService goal control', () => {
     userName: 'Owner',
     userEmail: 'owner@example.com',
   } as const;
+
+  it('retires uncertain configuration before releasing the turn owner', async () => {
+    const { service, deps, delivered, retired, failed, failures } = createGoalService({
+      transport: 'promptMeta',
+    });
+    deps.applyAcpModeAndModel = () => Effect.fail(new AcpConfigurationError('session', 'unknown'));
+    await service.controlSessionGoal({ ...goalArgs, action: 'resume' });
+    await failed.promise;
+    await service.waitForTurnRelease(goalSessionId, 'turn-1');
+    expect(delivered).toEqual([]);
+    expect(failures).toHaveLength(1);
+    expect(retired()).toBe(true);
+    expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(false);
+  });
 
   it('pauses out-of-band without opening a turn', async () => {
     const { service, goalStatus } = createGoalService({ transport: 'request' });
@@ -11871,12 +11999,13 @@ describe('SessionExecutionService goal control', () => {
       });
     const preparing = createDeferred<void>();
     const ready = createDeferred<void>();
-    deps.applyAcpModeAndModel = async (_session, config) => {
-      expect(config.modelId).toBeUndefined();
-      expect(config.modeId).toBeUndefined();
-      preparing.resolve();
-      await ready.promise;
-    };
+    deps.applyAcpModeAndModel = (_session, config) =>
+      Effect.promise(async () => {
+        expect(config.modelId).toBeUndefined();
+        expect(config.modeId).toBeUndefined();
+        preparing.resolve();
+        await ready.promise;
+      });
     await service.controlSessionGoal({ ...goalArgs, action: 'resume' });
     await preparing.promise;
     expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(true);
@@ -12816,6 +12945,7 @@ describe('Operation Inbox execution boundary', () => {
       return await originalDone.promise;
     });
     Object.assign(f.client, {
+      findSteerConfigMismatch: () => null,
       getAcknowledgedSteerCapability: () => ({
         provider: 'claudeCode',
         appliedNotificationMethod: 'claude/steerApplied',
